@@ -149,6 +149,18 @@ CREATE TABLE IF NOT EXISTS config (
     updated TEXT DEFAULT (datetime('now'))
 );
 
+-- open_notebook table (for ContentSettings and other app-wide singleton records)
+CREATE TABLE IF NOT EXISTS open_notebook (
+    id TEXT PRIMARY KEY,
+    default_content_processing_engine_doc TEXT DEFAULT 'auto',
+    default_content_processing_engine_url TEXT DEFAULT 'auto',
+    default_embedding_option TEXT DEFAULT 'ask',
+    auto_delete_files TEXT DEFAULT 'yes',
+    youtube_preferred_languages TEXT,  -- JSON array stored as TEXT
+    created TEXT DEFAULT (datetime('now')),
+    updated TEXT DEFAULT (datetime('now'))
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_source_title ON source(title);
 CREATE INDEX IF NOT EXISTS idx_source_updated ON source(updated);

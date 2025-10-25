@@ -229,7 +229,7 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     for key in row.keys():
         value = row[key]
         # Parse JSON fields
-        if key in ['topics', 'embedding'] and value:
+        if key in ['topics', 'embedding', 'youtube_preferred_languages'] and value:
             try:
                 result[key] = json.loads(value) if isinstance(value, str) else value
             except (json.JSONDecodeError, TypeError):
@@ -442,7 +442,7 @@ def _prepare_data_for_insert(table: str, data: Dict[str, Any]) -> Dict[str, Any]
 
     for key, value in data.items():
         # Handle JSON fields
-        if key in ['topics', 'embedding', 'speakers'] and value is not None:
+        if key in ['topics', 'embedding', 'speakers', 'youtube_preferred_languages'] and value is not None:
             if isinstance(value, (list, dict)):
                 prepared[key] = json.dumps(value)
             else:
