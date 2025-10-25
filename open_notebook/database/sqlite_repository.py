@@ -363,10 +363,18 @@ async def repo_query(
                 results = [await _apply_fetch_fields(row, fetch_fields) for row in results]
 
             return results
-        except Exception as e:
+        except sqlite3.OperationalError as e:
+            logger.exception("SQL operational error during query execution")
             logger.error(f"Query: {sql[:200]} vars: {parsed_vars}")
-            logger.exception(e)
-            raise
+            raise RuntimeError("Failed to execute query (operational error)") from e
+        except sqlite3.ProgrammingError as e:
+            logger.exception("SQL programming error during query execution")
+            logger.error(f"Query: {sql[:200]} vars: {parsed_vars}")
+            raise RuntimeError("Failed to execute query (invalid SQL)") from e
+        except Exception as e:
+            logger.exception("Unexpected error during query execution")
+            logger.error(f"Query: {sql[:200]} vars: {parsed_vars}")
+            raise RuntimeError("Failed to execute query") from e
 
 
 async def repo_create(table: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -417,9 +425,15 @@ async def repo_create(table: str, data: Dict[str, Any]) -> Dict[str, Any]:
             else:
                 raise RuntimeError("Failed to retrieve created record")
 
+    except sqlite3.IntegrityError as e:
+        logger.exception("Integrity error creating record")
+        raise RuntimeError("Failed to create record (integrity error)") from e
+    except sqlite3.OperationalError as e:
+        logger.exception("Operational error creating record")
+        raise RuntimeError("Failed to create record (operational error)") from e
     except Exception as e:
-        logger.exception(e)
-        raise RuntimeError(f"Failed to create record: {str(e)}")
+        logger.exception("Unexpected error creating record")
+        raise RuntimeError("Failed to create record") from e
 
 
 def _prepare_data_for_insert(table: str, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -504,9 +518,15 @@ async def repo_relate(
                 return [parse_record_ids(_row_to_dict(row))]
             return []
 
+    except sqlite3.IntegrityError as e:
+        logger.exception("Integrity error creating relationship")
+        raise RuntimeError("Failed to create relationship (integrity error)") from e
+    except sqlite3.OperationalError as e:
+        logger.exception("Operational error creating relationship")
+        raise RuntimeError("Failed to create relationship (operational error)") from e
     except Exception as e:
-        logger.exception(e)
-        raise RuntimeError(f"Failed to create relationship: {str(e)}")
+        logger.exception("Unexpected error creating relationship")
+        raise RuntimeError("Failed to create relationship") from e
 
 
 async def repo_upsert(
@@ -548,9 +568,12 @@ async def repo_upsert(
                 result = await repo_create(table, data)
                 return [result]
 
+    except sqlite3.OperationalError as e:
+        logger.exception("Operational error upserting record")
+        raise RuntimeError("Failed to upsert record (operational error)") from e
     except Exception as e:
-        logger.exception(e)
-        raise RuntimeError(f"Failed to upsert record: {str(e)}")
+        logger.exception("Unexpected error upserting record")
+        raise RuntimeError("Failed to upsert record") from e
 
 
 async def repo_update(
@@ -612,9 +635,15 @@ async def repo_update(
                 return [parse_record_ids(_row_to_dict(row))]
             return []
 
+    except sqlite3.IntegrityError as e:
+        logger.exception("Integrity error updating record")
+        raise RuntimeError("Failed to update record (integrity error)") from e
+    except sqlite3.OperationalError as e:
+        logger.exception("Operational error updating record")
+        raise RuntimeError("Failed to update record (operational error)") from e
     except Exception as e:
-        logger.exception(e)
-        raise RuntimeError(f"Failed to update record: {str(e)}")
+        logger.exception("Unexpected error updating record")
+        raise RuntimeError("Failed to update record") from e
 
 
 async def repo_delete(record_id: Union[str, Any]):
@@ -638,9 +667,15 @@ async def repo_delete(record_id: Union[str, Any]):
 
             return True
 
+    except ValueError as e:
+        logger.exception("Invalid record ID format for deletion")
+        raise RuntimeError("Failed to delete record (invalid ID format)") from e
+    except sqlite3.OperationalError as e:
+        logger.exception("Operational error deleting record")
+        raise RuntimeError("Failed to delete record (operational error)") from e
     except Exception as e:
-        logger.exception(e)
-        raise RuntimeError(f"Failed to delete record: {str(e)}")
+        logger.exception("Unexpected error deleting record")
+        raise RuntimeError("Failed to delete record") from e
 
 
 async def repo_insert(
@@ -654,18 +689,25 @@ async def repo_insert(
             try:
                 result = await repo_create(table, item)
                 results.append(result)
-            except sqlite3.IntegrityError:
+            except sqlite3.IntegrityError as e:
                 if ignore_duplicates:
                     continue
+                raise
+            except Exception as e:
                 raise
 
         return parse_record_ids(results)
 
+    except sqlite3.IntegrityError as e:
+        if ignore_duplicates:
+            return []
+        logger.exception("Integrity error inserting records")
+        raise RuntimeError("Failed to insert records (integrity error)") from e
     except Exception as e:
         if ignore_duplicates:
             return []
-        logger.exception(e)
-        raise RuntimeError(f"Failed to insert records: {str(e)}")
+        logger.exception("Unexpected error inserting records")
+        raise RuntimeError("Failed to insert records") from e
 
 
 async def repo_get_news_by_jota_id(jota_id: str) -> Dict[str, Any]:
@@ -676,6 +718,9 @@ async def repo_get_news_by_jota_id(jota_id: str) -> Dict[str, Any]:
             {"jota_id": jota_id},
         )
         return parse_record_ids(results)
+    except sqlite3.OperationalError as e:
+        logger.exception("Operational error fetching news by jota_id")
+        raise RuntimeError("Failed to fetch record (operational error)") from e
     except Exception as e:
-        logger.exception(e)
-        raise RuntimeError(f"Failed to fetch record: {str(e)}")
+        logger.exception("Unexpected error fetching news by jota_id")
+        raise RuntimeError("Failed to fetch record") from e
