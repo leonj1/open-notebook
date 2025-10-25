@@ -32,7 +32,7 @@ if "OPEN_NOTEBOOK_PASSWORD" in os.environ:
 def setup_test_environment():
     """Setup test environment before all tests"""
     print(f"\n{'='*60}")
-    print(f"SQLite Test Configuration")
+    print("SQLite Test Configuration")
     print(f"{'='*60}")
     print(f"DB_TYPE: {os.getenv('DB_TYPE')}")
     print(f"SQLITE_URL: {os.getenv('SQLITE_URL')}")
