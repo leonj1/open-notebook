@@ -14,7 +14,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # Configure to use SQLite
 os.environ["DB_TYPE"] = "sqlite"
-test_db = tempfile.mktemp(suffix=".db", prefix="test_")
+test_db_fd, test_db = tempfile.mkstemp(suffix=".db", prefix="test_")
+os.close(test_db_fd)  # Close the file descriptor, we only need the path
 os.environ["SQLITE_URL"] = f"sqlite:///{test_db}"
 
 print(f"Using test database: {test_db}")
