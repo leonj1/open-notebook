@@ -3,9 +3,14 @@ from typing import Any, ClassVar, Dict, List, Literal, Optional, Tuple, Union
 
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
-from surrealdb import RecordID
 
-from open_notebook.database.repository import ensure_record_id, repo_query
+# Import RecordID only if using SurrealDB
+try:
+    from surrealdb import RecordID
+except ImportError:
+    RecordID = str  # type: ignore
+
+from open_notebook.database.repository_factory import ensure_record_id, repo_query
 from open_notebook.domain.base import ObjectModel
 from open_notebook.domain.models import model_manager
 from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
