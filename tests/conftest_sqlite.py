@@ -20,7 +20,8 @@ sys.path.insert(0, str(project_root))
 os.environ["DB_TYPE"] = "sqlite"
 
 # Use a temporary database for tests
-test_db_file = tempfile.mktemp(suffix=".db", prefix="test_notebook_")
+with tempfile.NamedTemporaryFile(suffix=".db", prefix="test_notebook_", delete=False) as tf:
+    test_db_file = tf.name
 os.environ["SQLITE_URL"] = f"sqlite:///{test_db_file}"
 
 # Ensure password auth is disabled for tests
