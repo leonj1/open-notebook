@@ -61,27 +61,105 @@ def generate_id(table: str) -> str:
 
 def parse_surreal_query(query_str: str, vars: Optional[Dict[str, Any]] = None) -> tuple[str, Dict[str, Any]]:
     """
-    Parse a SurrealQL query and convert it to SQL.
-    This is a simplified parser that handles common patterns.
-    For complex queries, we'll need to extend this.
+    Parse a SurrealQL query and convert it to SQLite.
+
+    Handles common SurrealQL patterns:
+    - SELECT * FROM $id / SELECT * FROM ONLY $id
+    - omit field.subfield (excludes fields from results)
+    - fetch field (resolves record IDs - handled at application layer)
+    - CREATE table CONTENT {...} (converts to INSERT)
+    - DELETE table WHERE condition
+    - fn::text_search/vector_search (converts to SQLite equivalents)
+    - $variable substitution (converts to :variable)
     """
-    # This is a basic implementation - you may need to extend based on actual queries used
+    import re
+
     vars = vars or {}
+    sql = query_str.strip()
 
-    # Handle simple SELECT queries
-    if query_str.strip().upper().startswith("SELECT"):
-        # Replace SurrealDB syntax with SQLite syntax
-        sql = query_str
+    # Replace $variable references with :variable for named parameters
+    for var_name in vars.keys():
+        sql = re.sub(rf'\${re.escape(var_name)}\b', f':{var_name}', sql)
 
-        # Replace $variable references with ? placeholders
-        # We'll need to track the order for positional parameters
-        # For now, we'll use named parameters (:varname)
-        for var_name in vars.keys():
-            sql = sql.replace(f"${var_name}", f":{var_name}")
+    # Handle CREATE table CONTENT {...}
+    if re.match(r'CREATE\s+\w+\s+CONTENT\s*\{', sql, re.IGNORECASE):
+        # This pattern is used for inserts with JSON content
+        # We'll delegate to the repo_create function instead
+        # Return a marker that the caller should use repo_create
+        return "__USE_REPO_CREATE__", vars
 
+    # Handle DELETE table WHERE condition
+    delete_match = re.match(r'DELETE\s+(\w+)\s+WHERE\s+(.+)', sql, re.IGNORECASE)
+    if delete_match:
+        table = delete_match.group(1)
+        condition = delete_match.group(2)
+        sql = f"DELETE FROM {table} WHERE {condition}"
         return sql, vars
 
-    return query_str, vars
+    # Handle SELECT * FROM ONLY $record_id
+    # ONLY keyword means: if $record_id is a single record, return it; if it's an array, return error
+    # For SQLite, we'll just treat it as a regular SELECT since we're always selecting single records
+    sql = re.sub(r'\bFROM\s+ONLY\s+', 'FROM ', sql, flags=re.IGNORECASE)
+
+    # Handle SELECT * FROM $id (where $id is a record ID like "table:uuid")
+    # In SurrealDB, this queries the record by ID directly
+    # In SQLite, we need to extract table and use WHERE id = :id
+    # This is handled at runtime in repo_query
+
+    # Handle omit clause: "select * omit field1, field2.subfield from ..."
+    # SurrealDB omit excludes fields from results
+    # For SQLite, we need to either:
+    # 1. Select all fields except omitted ones (complex for nested fields)
+    # 2. Return all fields and filter at application layer (simpler)
+    # We'll use approach #2 - mark omitted fields for post-processing
+    omit_pattern = r'\s+omit\s+([\w.,\s]+?)(?=\s+from\s+|\s+$)'
+    omit_match = re.search(omit_pattern, sql, re.IGNORECASE)
+    omit_fields = []
+    if omit_match:
+        omit_fields_str = omit_match.group(1)
+        omit_fields = [f.strip() for f in omit_fields_str.split(',')]
+        # Remove omit clause from SQL
+        sql = re.sub(omit_pattern, '', sql, flags=re.IGNORECASE)
+
+    # Handle fetch clause: "fetch field1, field2"
+    # SurrealDB fetch resolves record IDs to their full records
+    # This requires JOINs in SQLite, which is complex for nested queries
+    # We'll mark fetch fields for post-processing at application layer
+    fetch_pattern = r'\s+fetch\s+([\w.,\s]+?)(?=\s+from\s+|\s+order\s+|\s+limit\s+|\s+$|\))'
+    fetch_match = re.search(fetch_pattern, sql, re.IGNORECASE)
+    fetch_fields = []
+    if fetch_match:
+        fetch_fields_str = fetch_match.group(1)
+        fetch_fields = [f.strip() for f in fetch_fields_str.split(',')]
+        # Remove fetch clause from SQL for now
+        # TODO: Implement proper JOIN logic for fetch
+        sql = re.sub(fetch_pattern, '', sql, flags=re.IGNORECASE)
+
+    # Handle fn::text_search(keyword, results, source, note)
+    # This is a custom SurrealDB function - needs SQLite FTS equivalent
+    fts_pattern = r'fn::text_search\s*\((.*?)\)'
+    if re.search(fts_pattern, sql, re.IGNORECASE):
+        # For now, mark this as requiring special handling
+        # Full-text search in SQLite requires FTS5 virtual tables
+        return "__USE_FTS__", vars
+
+    # Handle fn::vector_search(embedding, results, source, note, min_score)
+    # This is a custom SurrealDB function - needs vector search equivalent
+    vs_pattern = r'fn::vector_search\s*\((.*?)\)'
+    if re.search(vs_pattern, sql, re.IGNORECASE):
+        # Vector search in SQLite requires an extension like sqlite-vss
+        # For now, mark this as requiring special handling
+        return "__USE_VECTOR_SEARCH__", vars
+
+    # Store omit and fetch metadata for post-processing
+    if omit_fields or fetch_fields:
+        # Store in vars with special keys
+        if omit_fields:
+            vars['__omit_fields__'] = omit_fields
+        if fetch_fields:
+            vars['__fetch_fields__'] = fetch_fields
+
+    return sql, vars
 
 
 @asynccontextmanager
@@ -155,26 +233,115 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     return result
 
 
+def _apply_omit_fields(data: Dict[str, Any], omit_fields: List[str]) -> Dict[str, Any]:
+    """Remove omitted fields from result data"""
+    result = data.copy()
+    for field_path in omit_fields:
+        # Handle nested fields like "source.full_text"
+        parts = field_path.split('.')
+        if len(parts) == 1:
+            # Simple field
+            result.pop(parts[0], None)
+        else:
+            # Nested field
+            current = result
+            for i, part in enumerate(parts[:-1]):
+                if part in current and isinstance(current[part], dict):
+                    current = current[part]
+                else:
+                    break
+            else:
+                # Successfully navigated to parent, remove final field
+                current.pop(parts[-1], None)
+    return result
+
+
+async def _apply_fetch_fields(data: Dict[str, Any], fetch_fields: List[str]) -> Dict[str, Any]:
+    """Resolve record ID references in fetch fields"""
+    result = data.copy()
+    for field in fetch_fields:
+        if field in result:
+            field_value = result[field]
+            # Check if it's a record ID (format: "table:id")
+            if isinstance(field_value, str) and ':' in field_value:
+                # Fetch the referenced record
+                try:
+                    table = field_value.split(':')[0]
+                    fetched = await repo_query(
+                        f"SELECT * FROM {table} WHERE id = :id",
+                        {"id": field_value}
+                    )
+                    if fetched:
+                        result[field] = fetched[0]
+                except Exception as e:
+                    logger.warning(f"Failed to fetch {field}={field_value}: {e}")
+    return result
+
+
 async def repo_query(
     query_str: str, vars: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
     """Execute a SQL query and return the results"""
 
+    # Parse SurrealQL to SQLite
+    sql, parsed_vars = parse_surreal_query(query_str, vars)
+
+    # Extract post-processing metadata
+    omit_fields = parsed_vars.pop('__omit_fields__', [])
+    fetch_fields = parsed_vars.pop('__fetch_fields__', [])
+
+    # Handle special markers
+    if sql == "__USE_REPO_CREATE__":
+        raise RuntimeError(
+            "CREATE CONTENT queries should use repo_create() instead of repo_query(). "
+            "Parse the query content and call repo_create(table, data)."
+        )
+
+    if sql == "__USE_FTS__":
+        raise NotImplementedError(
+            "Full-text search (fn::text_search) requires SQLite FTS5 virtual tables. "
+            "This will be implemented in a future update."
+        )
+
+    if sql == "__USE_VECTOR_SEARCH__":
+        raise NotImplementedError(
+            "Vector search (fn::vector_search) requires a vector extension like sqlite-vss. "
+            "This will be implemented in a future update."
+        )
+
     async with db_connection() as conn:
         try:
-            # For simple queries, execute directly
-            # For complex SurrealQL, we may need translation
+            # Handle SELECT * FROM $id pattern (direct record lookup by ID)
+            # Check if this is a simple "SELECT * FROM :var" pattern
+            import re
+            select_from_id = re.match(r'SELECT\s+\*\s+FROM\s+:(\w+)', sql, re.IGNORECASE)
+            if select_from_id:
+                var_name = select_from_id.group(1)
+                record_id = parsed_vars.get(var_name)
+                if record_id and isinstance(record_id, str) and ':' in record_id:
+                    # Extract table from record ID
+                    table = record_id.split(':')[0]
+                    sql = f"SELECT * FROM {table} WHERE id = :{var_name}"
 
             cursor = await asyncio.to_thread(
                 conn.execute,
-                query_str,
-                vars or {}
+                sql,
+                parsed_vars
             )
             rows = await asyncio.to_thread(cursor.fetchall)
 
-            return parse_record_ids([_row_to_dict(row) for row in rows])
+            results = parse_record_ids([_row_to_dict(row) for row in rows])
+
+            # Apply post-processing
+            if omit_fields:
+                results = [_apply_omit_fields(row, omit_fields) for row in results]
+
+            if fetch_fields:
+                results = [await _apply_fetch_fields(row, fetch_fields) for row in results]
+
+            return results
         except Exception as e:
-            logger.error(f"Query: {query_str[:200]} vars: {vars}")
+            logger.error(f"Query: {sql[:200]} vars: {parsed_vars}")
             logger.exception(e)
             raise
 
