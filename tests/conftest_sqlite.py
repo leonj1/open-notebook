@@ -70,7 +70,7 @@ async def reset_database():
             table_name = table_row[0]
             # Skip FTS tables - they'll be cleared when main tables are cleared
             if not table_name.endswith('_fts'):
-                await asyncio.to_thread(conn.execute, f"DELETE FROM {table_name}")
+                await asyncio.to_thread(conn.execute, f'DELETE FROM "{table_name}"')
 
         await asyncio.to_thread(conn.commit)
 
