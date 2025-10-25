@@ -46,7 +46,7 @@ def setup_test_environment():
         try:
             os.remove(test_db_file)
             print(f"\n✓ Cleaned up test database: {test_db_file}")
-        except Exception as e:
+        except OSError as e:
             print(f"\n✗ Failed to cleanup test database: {e}")
 
 
