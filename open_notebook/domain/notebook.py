@@ -30,6 +30,14 @@ class Notebook(ObjectModel):
             raise InvalidInputError("Notebook name cannot be empty")
         return v
 
+    @field_validator("archived", mode="before")
+    @classmethod
+    def convert_archived_to_bool(cls, v):
+        """Convert SQLite integer (0/1) to boolean."""
+        if isinstance(v, int):
+            return bool(v)
+        return v
+
     async def get_sources(self) -> List["Source"]:
         try:
             srcs = await repo_query(
