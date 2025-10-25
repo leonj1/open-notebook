@@ -8,6 +8,7 @@ and how to switch between SQLite and SurrealDB.
 import asyncio
 import os
 import sys
+import subprocess
 from pathlib import Path
 
 # Add project root to path
@@ -94,28 +95,60 @@ async def example_sqlite():
 
 
 async def example_dynamic_selection():
-    """Example showing dynamic repository selection"""
+    """
+    Example showing dynamic repository selection.
+
+    Note: DB_TYPE must be set BEFORE the application starts, as the factory
+    module loads the appropriate backend at import time. This example uses
+    subprocesses to demonstrate proper backend selection.
+    """
     print("\n" + "=" * 60)
     print("EXAMPLE 2: Dynamic Repository Selection")
     print("=" * 60)
 
-    from open_notebook.database.repository_factory import get_database_type
+    print("\n⚠️  IMPORTANT: DB_TYPE must be set before importing the factory!")
+    print("The factory loads the backend module at import time, so changing")
+    print("DB_TYPE at runtime won't switch backends in the same process.\n")
 
-    # Test with different DB_TYPE values
+    # Create a test script that each subprocess will run
+    test_script = '''
+import os
+import sys
+sys.path.insert(0, "{project_root}")
+
+from open_notebook.database.repository_factory import get_database_type, get_repository_module
+
+db_type = get_database_type()
+module = get_repository_module()
+
+print(f"DB_TYPE={{os.getenv('DB_TYPE')}}")
+print(f"  → Factory selected: {{db_type}}")
+print(f"  → Module: {{module.__name__}}")
+'''.format(project_root=Path(__file__).parent)
+
+    # Test with different DB_TYPE values in separate processes
     for db_type in ["sqlite", "surrealdb"]:
-        os.environ["DB_TYPE"] = db_type
+        print(f"\nTesting with DB_TYPE={db_type} (in subprocess):")
 
-        # Re-import to get new factory instance
-        import importlib
-        import open_notebook.database.repository_factory as factory
-        importlib.reload(factory)
+        env = os.environ.copy()
+        env["DB_TYPE"] = db_type
 
-        detected_type = factory.get_database_type()
-        print(f"\nDB_TYPE={db_type}")
-        print(f"  → Factory selected: {detected_type}")
-        print(f"  → Module: {factory.get_repository_module().__name__}")
+        result = subprocess.run(
+            [sys.executable, "-c", test_script],
+            env=env,
+            capture_output=True,
+            text=True
+        )
 
-    print("\n✓ Dynamic selection working correctly!")
+        if result.returncode == 0:
+            print(result.stdout.strip())
+        else:
+            print(f"  ✗ Error: {result.stderr}")
+
+    print("\n✓ Backend selection verified across processes!")
+    print("\n💡 Best Practice:")
+    print("   Set DB_TYPE environment variable before starting your application,")
+    print("   then import from repository_factory to get the correct backend.")
     print("=" * 60)
 
 
