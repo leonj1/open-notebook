@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS source_embedding (
     source TEXT NOT NULL,  -- Foreign key to source.id
     "order" INTEGER NOT NULL,
     content TEXT NOT NULL,
-    embedding BLOB,  -- Store as JSON or binary
+    embedding TEXT,  -- JSON-serialized vector
     created TEXT DEFAULT (datetime('now')),
     updated TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (source) REFERENCES source(id) ON DELETE CASCADE
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS source_insight (
     source TEXT NOT NULL,  -- Foreign key to source.id
     insight_type TEXT NOT NULL,
     content TEXT NOT NULL,
-    embedding BLOB,  -- Store as JSON or binary
+    embedding TEXT,  -- JSON-serialized vector
     created TEXT DEFAULT (datetime('now')),
     updated TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (source) REFERENCES source(id) ON DELETE CASCADE
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS note (
     summary TEXT,
     note_type TEXT,  -- 'human' or 'ai'
     content TEXT,
-    embedding BLOB,  -- Store as JSON or binary
+    embedding TEXT,  -- JSON-serialized vector
     created TEXT DEFAULT (datetime('now')),
     updated TEXT DEFAULT (datetime('now'))
 );
