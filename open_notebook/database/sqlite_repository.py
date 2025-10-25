@@ -100,6 +100,9 @@ async def db_connection():
     # Set check_same_thread=False to allow usage across threads with asyncio.to_thread
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row  # Return rows as dictionaries
+    # Enforce foreign keys and improve busy handling
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
 
     try:
         # Initialize schema if needed
