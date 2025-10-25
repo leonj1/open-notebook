@@ -11,6 +11,7 @@ Environment Variables:
 import asyncio
 import json
 import os
+import re
 import sqlite3
 import uuid
 from contextlib import asynccontextmanager
@@ -19,6 +20,28 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
+
+
+# Regex for valid SQL identifiers (letters, digits, underscores)
+_IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_identifier(name: str) -> str:
+    """
+    Validate and return a SQL identifier to prevent SQL injection.
+
+    Args:
+        name: The identifier to validate (table name, column name, etc.)
+
+    Returns:
+        The validated identifier
+
+    Raises:
+        ValueError: If the identifier is invalid
+    """
+    if not _IDENT_RE.fullmatch(name):
+        raise ValueError(f"Invalid SQL identifier: {name!r}")
+    return name
 
 
 def get_sqlite_url() -> str:
@@ -348,6 +371,9 @@ async def repo_query(
 
 async def repo_create(table: str, data: Dict[str, Any]) -> Dict[str, Any]:
     """Create a new record in the specified table"""
+    # Validate table name to prevent SQL injection
+    table = _validate_identifier(table)
+
     data = data.copy()
     data.pop("id", None)  # Remove id if present
 
@@ -365,9 +391,10 @@ async def repo_create(table: str, data: Dict[str, Any]) -> Dict[str, Any]:
             # Handle special fields
             insert_data = _prepare_data_for_insert(table, data)
 
-            # Build INSERT query
-            columns = list(insert_data.keys())
-            placeholders = [f":{col}" for col in columns]
+            # Build INSERT query with validated identifiers
+            # Validate column names to prevent SQL injection
+            columns = [_validate_identifier(col) for col in insert_data.keys()]
+            placeholders = [f":{col}" for col in insert_data.keys()]
 
             sql = f"""
                 INSERT INTO {table} ({', '.join(columns)})
@@ -424,6 +451,9 @@ async def repo_relate(
     source: str, relationship: str, target: str, data: Optional[Dict[str, Any]] = None
 ) -> List[Dict[str, Any]]:
     """Create a relationship between two records with optional data"""
+    # Validate relationship table name to prevent SQL injection
+    relationship = _validate_identifier(relationship)
+
     if data is None:
         data = {}
 
@@ -443,8 +473,15 @@ async def repo_relate(
     try:
         async with db_connection() as conn:
             # Build INSERT query for relationship table
-            # Need to quote 'in' and 'out' as they are SQL keywords
-            columns = [f'"{col}"' if col in ['in', 'out'] else col for col in rel_data.keys()]
+            # Validate column names and quote 'in' and 'out' as they are SQL keywords
+            columns = []
+            for col in rel_data.keys():
+                _validate_identifier(col)  # Validate first
+                if col in ['in', 'out']:
+                    columns.append(f'"{col}"')  # Quote SQL keywords
+                else:
+                    columns.append(col)
+
             placeholders = [f":{col}" for col in rel_data.keys()]
 
             sql = f"""
@@ -476,6 +513,9 @@ async def repo_upsert(
     table: str, id: Optional[str], data: Dict[str, Any], add_timestamp: bool = False
 ) -> List[Dict[str, Any]]:
     """Create or update a record in the specified table"""
+    # Validate table name to prevent SQL injection
+    table = _validate_identifier(table)
+
     data = data.copy()
     data.pop("id", None)
 
@@ -529,6 +569,9 @@ async def repo_update(
         else:
             record_id = f"{table}:{id}"
 
+        # Validate table name to prevent SQL injection
+        table = _validate_identifier(table)
+
         data = data.copy()
         data.pop("id", None)
 
@@ -544,8 +587,8 @@ async def repo_update(
             # Prepare data
             update_data = _prepare_data_for_insert(table, data)
 
-            # Build UPDATE query
-            set_clauses = [f"{col} = :{col}" for col in update_data.keys()]
+            # Build UPDATE query with validated column names
+            set_clauses = [f"{_validate_identifier(col)} = :{col}" for col in update_data.keys()]
             sql = f"""
                 UPDATE {table}
                 SET {', '.join(set_clauses)}
@@ -584,6 +627,9 @@ async def repo_delete(record_id: Union[str, Any]):
             raise ValueError(f"Invalid record ID format: {record_id}")
 
         table, _ = record_id.split(":", 1)
+
+        # Validate table name to prevent SQL injection
+        table = _validate_identifier(table)
 
         async with db_connection() as conn:
             sql = f"DELETE FROM {table} WHERE id = :id"
