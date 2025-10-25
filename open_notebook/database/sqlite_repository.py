@@ -441,8 +441,8 @@ async def repo_insert(
             try:
                 result = await repo_create(table, item)
                 results.append(result)
-            except Exception as e:
-                if ignore_duplicates and "UNIQUE constraint failed" in str(e):
+            except sqlite3.IntegrityError:
+                if ignore_duplicates:
                     continue
                 raise
 
