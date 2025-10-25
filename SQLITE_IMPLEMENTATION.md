@@ -242,18 +242,24 @@ def _prepare_data_for_insert(table: str, data: Dict[str, Any]):
 
 ## Integration with Existing Code
 
-The implementation is designed to be a drop-in replacement:
+The implementation is designed to be a drop-in replacement with minimal changes to existing code:
 
-1. Domain models (`open_notebook/domain/`) - No changes needed, they use the factory
-2. API routers (`api/routers/`) - No changes needed
-3. Tests - Use `conftest_sqlite.py` to configure SQLite mode
+1. **Domain models** (`open_notebook/domain/`) - Business logic unchanged, but import statements updated to use the factory
+2. **API routers** (`api/routers/`) - No changes needed
+3. **Tests** - Use `conftest_sqlite.py` to configure SQLite mode
 
 ### Modified Files
 
-To support both databases, two files were updated to import from the factory:
+To support both databases, the following files had their import statements updated to use `repository_factory`:
 
-1. `open_notebook/domain/base.py` - Changed to import from `repository_factory`
-2. `open_notebook/domain/notebook.py` - Changed to import from `repository_factory` and made RecordID import optional
+1. **`open_notebook/domain/base.py`** (line 8)
+   - Changed to import repository functions from `repository_factory` instead of direct repository
+
+2. **`open_notebook/domain/notebook.py`** (line 13)
+   - Changed to import `ensure_record_id` and `repo_query` from `repository_factory`
+   - Made RecordID import optional for SQLite compatibility
+
+These changes only affect import statements—the business logic in domain models remains unchanged.
 
 ## Conclusion
 
