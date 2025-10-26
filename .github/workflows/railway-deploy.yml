@@ -7,7 +7,6 @@ on:
 
 jobs:
   deploy:
-    if: ${{ secrets.RAILWAY_TOKEN != '' }}
     runs-on: ubuntu-latest
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
@@ -17,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Use Railway CLI container
+        if: ${{ env.RAILWAY_TOKEN != '' }}
         uses: addnab/docker-run-action@v3
         with:
           image: ghcr.io/railwayapp/cli:latest
