@@ -22,21 +22,27 @@ This section provides comprehensive guides for deploying Open Notebook in differ
 - Ideal for cloud hosting platforms
 - Lower resource requirements
 
-### 3. [Development Setup](development.md)
+### 3. [Railway Deployment](railway.md)
+**PaaS single-container on Railway**
+- Uses `Dockerfile.single` via `railway.json`
+- Next.js UI exposed on Railway’s `$PORT`
+- API proxied internally via `/api/*`
+
+### 4. [Development Setup](development.md)
 **For contributors and advanced users**
 - Local development environment
 - Source code installation
 - Development tools and debugging
 - Contributing to the project
 
-### 4. [Reverse Proxy Configuration](reverse-proxy.md)
+### 5. [Reverse Proxy Configuration](reverse-proxy.md)
 **For production deployments with custom domains**
 - nginx, Caddy, Traefik configurations
 - Custom domain setup
 - SSL/HTTPS configuration
 - Runtime API URL configuration
 
-### 5. [Security Configuration](security.md)
+### 6. [Security Configuration](security.md)
 **Essential for public deployments**
 - Password protection setup
 - Security best practices
