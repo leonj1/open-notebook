@@ -346,7 +346,7 @@ async def repo_query(
                 record_id = parsed_vars.get(var_name)
                 if record_id and isinstance(record_id, str) and ':' in record_id:
                     # Extract table from record ID
-                    table = record_id.split(':')[0]
+                    table = _validate_identifier(record_id.split(':')[0])
                     sql = f"SELECT * FROM {table} WHERE id = :{var_name}"
 
             cursor = await asyncio.to_thread(
