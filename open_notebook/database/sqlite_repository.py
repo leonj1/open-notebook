@@ -808,18 +808,31 @@ async def repo_upsert(
             )
             exists = await asyncio.to_thread(cursor.fetchone)
 
-        if exists:
-            # Update
-            return await repo_update(table, record_id, data)
-        else:
-            # Create
-            if "created" not in data:
-                data["created"] = datetime.now(timezone.utc).isoformat()
-            if "updated" not in data:
-                data["updated"] = datetime.now(timezone.utc).isoformat()
+            if exists:
+                # Update
+                return await repo_update(table, record_id, data)
+            else:
+                # Create (preserve record_id)
+                if "created" not in data:
+                    data["created"] = datetime.now(timezone.utc).isoformat()
+                if "updated" not in data:
+                    data["updated"] = datetime.now(timezone.utc).isoformat()
 
-            result = await repo_create(table, data)
-            return [result]
+                # Insert directly to preserve the provided record_id
+                insert_data = _prepare_data_for_insert(table, data)
+                columns = [_validate_identifier(col) for col in insert_data.keys()]
+                placeholders = [f":{col}" for col in insert_data.keys()]
+                sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join(placeholders)})"
+
+                await asyncio.to_thread(conn.execute, sql, insert_data)
+                await asyncio.to_thread(conn.commit)
+
+                # Fetch and return the created record
+                cursor = await asyncio.to_thread(
+                    conn.execute, f"SELECT * FROM {table} WHERE id = :id", {"id": record_id}
+                )
+                row = await asyncio.to_thread(cursor.fetchone)
+                return [parse_record_ids(_row_to_dict(row))] if row else []
 
     except sqlite3.OperationalError as e:
         logger.exception("Operational error upserting record")
