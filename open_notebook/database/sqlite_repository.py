@@ -290,13 +290,15 @@ async def _apply_fetch_fields(data: Dict[str, Any], fetch_fields: List[str]) -> 
             if isinstance(field_value, str) and ':' in field_value:
                 # Fetch the referenced record
                 try:
-                    table = field_value.split(':')[0]
+                    table = _validate_identifier(field_value.split(':')[0])
                     fetched = await repo_query(
                         f"SELECT * FROM {table} WHERE id = :id",
                         {"id": field_value}
                     )
                     if fetched:
                         result[field] = fetched[0]
+                except ValueError as e:
+                    logger.warning(f"Invalid table identifier in {field}={field_value}: {e}")
                 except Exception as e:
                     logger.warning(f"Failed to fetch {field}={field_value}: {e}")
     return result
