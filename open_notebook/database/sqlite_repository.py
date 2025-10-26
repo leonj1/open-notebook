@@ -348,7 +348,8 @@ def parse_surreal_query(query_str: str, vars: Optional[Dict[str, Any]] = None) -
     """
     import re
 
-    vars = vars or {}
+    # Work on a copy to avoid mutating the caller-provided mapping
+    vars = dict(vars or {})
     sql = query_str.strip()
 
     # Replace $variable references with :variable for named parameters
