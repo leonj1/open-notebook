@@ -145,7 +145,7 @@ async def repo_update(
         raise RuntimeError(f"Failed to update record: {str(e)}")
 
 
-async def repo_get_news_by_jota_id(jota_id: str) -> Dict[str, Any]:
+async def repo_get_news_by_jota_id(jota_id: str) -> List[Dict[str, Any]]:
     try:
         results = await repo_query(
             "SELECT * omit embedding FROM news where jota_id=$jota_id",
