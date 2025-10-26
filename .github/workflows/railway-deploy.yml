@@ -1,0 +1,50 @@
+name: Deploy to Railway
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      SERVICE_NAME: open-notebook
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Railway CLI container
+        uses: addnab/docker-run-action@v3
+        with:
+          image: ghcr.io/railwayapp/cli:latest
+          options: >-
+            -e RAILWAY_TOKEN=${{ env.RAILWAY_TOKEN }}
+            -e CI=true
+            -v ${{ github.workspace }}:/workspace
+            -w /workspace
+          run: |
+            set -euo pipefail
+            railway -V
+            # Optional: create or ensure a public domain is generated
+            railway domain --service $SERVICE_NAME || true
+
+            # Set recommended variables if provided as repo secrets
+            if [ -n "${{ secrets.OPEN_NOTEBOOK_PASSWORD }}" ]; then
+              railway variables --service $SERVICE_NAME --set "OPEN_NOTEBOOK_PASSWORD=${{ secrets.OPEN_NOTEBOOK_PASSWORD }}"
+            fi
+            if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+              railway variables --service $SERVICE_NAME --set "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}"
+            fi
+
+            # Discover domain and set API_URL accordingly (ignore errors on first deploy)
+            DOMAIN_JSON=$(railway domain --service $SERVICE_NAME --json || echo '{}')
+            PUBLIC_DOMAIN=$(echo "$DOMAIN_JSON" | jq -r '.domain // empty')
+            if [ -n "$PUBLIC_DOMAIN" ]; then
+              railway variables --service $SERVICE_NAME --set "API_URL=https://$PUBLIC_DOMAIN"
+            fi
+
+            # Deploy using config-as-code (Dockerfile.single via railway.json)
+            railway up --service $SERVICE_NAME
+
