@@ -1,0 +1,11 @@
+# CodeRabbit configuration
+# Enables automatic reviews on pull requests targeting any branch.
+
+reviews:
+  auto_review:
+    enabled: true
+    # Accepts regex; '.*' matches all branches (non-default base branches).
+    # Default branch is reviewed automatically by CodeRabbit.
+    base_branches:
+      - ".*"
+
