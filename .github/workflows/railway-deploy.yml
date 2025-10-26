@@ -7,6 +7,7 @@ on:
 
 jobs:
   deploy:
+    if: ${{ secrets.RAILWAY_TOKEN != '' }}
     runs-on: ubuntu-latest
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
@@ -47,4 +48,3 @@ jobs:
 
             # Deploy using config-as-code (Dockerfile.single via railway.json)
             railway up --service $SERVICE_NAME
-
