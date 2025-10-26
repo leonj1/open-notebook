@@ -3,9 +3,14 @@ from typing import Any, ClassVar, Dict, List, Literal, Optional, Tuple, Union
 
 from loguru import logger
 from pydantic import BaseModel, Field, field_validator
-from surrealdb import RecordID
 
-from open_notebook.database.repository import ensure_record_id, repo_query
+# Import RecordID only if using SurrealDB
+try:
+    from surrealdb import RecordID
+except ImportError:
+    RecordID = str  # type: ignore
+
+from open_notebook.database.repository_factory import ensure_record_id, repo_query
 from open_notebook.domain.base import ObjectModel
 from open_notebook.domain.models import model_manager
 from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
@@ -23,6 +28,14 @@ class Notebook(ObjectModel):
     def name_must_not_be_empty(cls, v):
         if not v.strip():
             raise InvalidInputError("Notebook name cannot be empty")
+        return v
+
+    @field_validator("archived", mode="before")
+    @classmethod
+    def convert_archived_to_bool(cls, v):
+        """Convert SQLite integer (0/1) to boolean."""
+        if isinstance(v, int):
+            return bool(v)
         return v
 
     async def get_sources(self) -> List["Source"]:

@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from api.models import NotebookCreate, NotebookResponse, NotebookUpdate
-from open_notebook.database.repository import ensure_record_id, repo_query
+from open_notebook.database.repository_factory import ensure_record_id, repo_query
 from open_notebook.domain.notebook import Notebook, Source
 from open_notebook.exceptions import InvalidInputError
 
@@ -18,12 +18,16 @@ async def get_notebooks(
 ):
     """Get all notebooks with optional filtering and ordering."""
     try:
-        # Build the query with counts
+        # Build the query with counts - SQLite compatible version
         query = f"""
-            SELECT *,
-            count(<-reference.in) as source_count,
-            count(<-artifact.in) as note_count
-            FROM notebook
+            SELECT
+                n.*,
+                COALESCE(COUNT(DISTINCT r.id), 0) as source_count,
+                COALESCE(COUNT(DISTINCT a.id), 0) as note_count
+            FROM notebook n
+            LEFT JOIN reference r ON r.out = n.id
+            LEFT JOIN artifact a ON a.out = n.id
+            GROUP BY n.id, n.name, n.description, n.archived, n.created, n.updated
             ORDER BY {order_by}
         """
 
@@ -86,12 +90,17 @@ async def create_notebook(notebook: NotebookCreate):
 async def get_notebook(notebook_id: str):
     """Get a specific notebook by ID."""
     try:
-        # Query with counts for single notebook
+        # Query with counts for single notebook - SQLite compatible version
         query = """
-            SELECT *,
-            count(<-reference.in) as source_count,
-            count(<-artifact.in) as note_count
-            FROM $notebook_id
+            SELECT
+                n.*,
+                COALESCE(COUNT(DISTINCT r.id), 0) as source_count,
+                COALESCE(COUNT(DISTINCT a.id), 0) as note_count
+            FROM notebook n
+            LEFT JOIN reference r ON r.out = n.id
+            LEFT JOIN artifact a ON a.out = n.id
+            WHERE n.id = :notebook_id
+            GROUP BY n.id, n.name, n.description, n.archived, n.created, n.updated
         """
         result = await repo_query(query, {"notebook_id": ensure_record_id(notebook_id)})
 
@@ -136,12 +145,17 @@ async def update_notebook(notebook_id: str, notebook_update: NotebookUpdate):
 
         await notebook.save()
 
-        # Query with counts after update
+        # Query with counts after update - SQLite compatible version
         query = """
-            SELECT *,
-            count(<-reference.in) as source_count,
-            count(<-artifact.in) as note_count
-            FROM $notebook_id
+            SELECT
+                n.*,
+                COALESCE(COUNT(DISTINCT r.id), 0) as source_count,
+                COALESCE(COUNT(DISTINCT a.id), 0) as note_count
+            FROM notebook n
+            LEFT JOIN reference r ON r.out = n.id
+            LEFT JOIN artifact a ON a.out = n.id
+            WHERE n.id = :notebook_id
+            GROUP BY n.id, n.name, n.description, n.archived, n.created, n.updated
         """
         result = await repo_query(query, {"notebook_id": ensure_record_id(notebook_id)})
 

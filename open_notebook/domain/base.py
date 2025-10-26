@@ -4,7 +4,8 @@ from typing import Any, ClassVar, Dict, List, Optional, Type, TypeVar, Union, ca
 from loguru import logger
 from pydantic import BaseModel, ValidationError, field_validator, model_validator
 
-from open_notebook.database.repository import (
+# Use factory to get the right repository implementation
+from open_notebook.database.repository_factory import (
     ensure_record_id,
     repo_create,
     repo_delete,

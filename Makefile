@@ -1,4 +1,4 @@
-.PHONY: run frontend check ruff database lint api start-all stop-all status clean-cache worker worker-start worker-stop worker-restart
+.PHONY: run frontend check ruff database lint api start-all start-sqlite stop-all stop-sqlite restart-sqlite status clean-cache worker worker-start worker-stop worker-restart
 .PHONY: docker-buildx-prepare docker-buildx-clean docker-buildx-reset
 .PHONY: docker-push docker-push-latest docker-release tag export-docs
 
@@ -144,6 +144,30 @@ worker-restart: worker-stop
 	@$(MAKE) worker-start
 
 # === Service Management ===
+start-sqlite:
+	@echo "🚀 Starting Open Notebook with SQLite (API + Frontend)..."
+	@echo "📊 Using SQLite database (no container needed)..."
+	@if [ ! -f .env ]; then \
+		echo "⚠️  No .env file found. Creating one with SQLite configuration..."; \
+		echo "DB_TYPE=sqlite" > .env; \
+		echo "SQLITE_URL=sqlite:///./data/notebook.db" >> .env; \
+		echo "API_URL=http://localhost:5055" >> .env; \
+		echo "✅ Created .env file. Add your API keys if needed."; \
+	fi
+	@echo "⚠️  Note: Background worker is disabled with SQLite (requires SurrealDB)"
+	@echo "         Long-running tasks like embeddings will run synchronously"
+	@echo ""
+	@echo "🔧 Starting API backend..."
+	@uv run run_api.py &
+	@sleep 3
+	@echo "🌐 Starting Next.js frontend on port 3006..."
+	@echo "✅ Services started!"
+	@echo "📱 Frontend: http://localhost:3006"
+	@echo "🔗 API: http://localhost:5055"
+	@echo "📚 API Docs: http://localhost:5055/docs"
+	@echo "📡 Backend accessible at: $(shell grep '^API_URL=' .env | cut -d'=' -f2)"
+	cd frontend && PORT=3006 API_URL=$(shell grep '^API_URL=' .env | cut -d'=' -f2) npm run dev
+
 start-all:
 	@echo "🚀 Starting Open Notebook (Database + API + Worker + Frontend)..."
 	@echo "📊 Starting SurrealDB..."
@@ -161,6 +185,27 @@ start-all:
 	@echo "🔗 API: http://localhost:5055"
 	@echo "📚 API Docs: http://localhost:5055/docs"
 	cd frontend && npm run dev
+
+stop-sqlite:
+	@echo "🛑 Stopping Open Notebook (SQLite mode)..."
+	@pkill -f "next dev" || true
+	@pkill -f "run_api.py" || true
+	@pkill -f "uvicorn api.main:app" || true
+	@# Kill any processes on ports 5055 and 3006
+	@fuser -k 5055/tcp 2>/dev/null || true
+	@fuser -k 3006/tcp 2>/dev/null || true
+	@sleep 1
+	@echo "✅ SQLite services stopped!"
+
+restart-sqlite:
+	@echo "🔄 Restarting Open Notebook (SQLite mode)..."
+	@# Kill processes without using pkill to avoid terminating make
+	@fuser -k 5055/tcp 2>/dev/null || true
+	@fuser -k 3006/tcp 2>/dev/null || true
+	@ps aux | grep -E "run_api.py|next dev" | grep -v grep | awk '{print $$2}' | xargs -r kill -9 2>/dev/null || true
+	@sleep 2
+	@echo "✅ Services stopped, starting fresh..."
+	@$(MAKE) start-sqlite
 
 stop-all:
 	@echo "🛑 Stopping all Open Notebook services..."

@@ -7,7 +7,7 @@ from typing import List
 
 from loguru import logger
 
-from .repository import db_connection, repo_query
+from .repository_factory import db_connection, repo_query, get_database_type
 
 
 class AsyncMigration:
@@ -124,15 +124,26 @@ class AsyncMigrationManager:
 
     async def get_current_version(self) -> int:
         """Get current database version."""
+        # SQLite doesn't use migrations, return -1 to indicate N/A
+        if get_database_type() == "sqlite":
+            return -1
         return await get_latest_version()
 
     async def needs_migration(self) -> bool:
         """Check if migration is needed."""
+        # SQLite auto-initializes schema, no migrations needed
+        if get_database_type() == "sqlite":
+            return False
         current_version = await self.get_current_version()
         return current_version < len(self.up_migrations)
 
     async def run_migration_up(self):
         """Run all pending migrations."""
+        # SQLite auto-initializes schema, no migrations needed
+        if get_database_type() == "sqlite":
+            logger.info("Using SQLite - schema is auto-initialized, skipping migrations")
+            return
+
         current_version = await self.get_current_version()
         logger.info(f"Current version before migration: {current_version}")
 

@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Request
 from loguru import logger
 
-from open_notebook.database.repository import repo_query
+from open_notebook.database.repository_factory import repo_query, get_database_type
 from open_notebook.utils.version_utils import (
     compare_versions,
     get_version_from_github,
@@ -106,6 +106,12 @@ async def check_database_health() -> dict:
         dict with 'status' ("online" | "offline") and optional 'error'
     """
     try:
+        # For SQLite, database is always available (file-based)
+        db_type = get_database_type()
+        if db_type == "sqlite":
+            return {"status": "online"}
+
+        # For SurrealDB, check connection with a lightweight query
         # 2-second timeout for database health check
         result = await asyncio.wait_for(
             repo_query("RETURN 1"),
