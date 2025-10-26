@@ -368,15 +368,15 @@ async def repo_query(
             return results
         except sqlite3.OperationalError as e:
             logger.exception("SQL operational error during query execution")
-            logger.error(f"Query: {sql[:200]} vars: {parsed_vars}")
+            logger.error(f"Query: {sql[:200]} vars_keys: {list(parsed_vars.keys())}")
             raise RuntimeError("Failed to execute query (operational error)") from e
         except sqlite3.ProgrammingError as e:
             logger.exception("SQL programming error during query execution")
-            logger.error(f"Query: {sql[:200]} vars: {parsed_vars}")
+            logger.error(f"Query: {sql[:200]} vars_keys: {list(parsed_vars.keys())}")
             raise RuntimeError("Failed to execute query (invalid SQL)") from e
         except Exception as e:
             logger.exception("Unexpected error during query execution")
-            logger.error(f"Query: {sql[:200]} vars: {parsed_vars}")
+            logger.error(f"Query: {sql[:200]} vars_keys: {list(parsed_vars.keys())}")
             raise RuntimeError("Failed to execute query") from e
 
 
