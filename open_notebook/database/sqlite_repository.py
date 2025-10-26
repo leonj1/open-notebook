@@ -115,7 +115,7 @@ def parse_surreal_query(query_str: str, vars: Optional[Dict[str, Any]] = None) -
     # Handle DELETE table WHERE condition
     delete_match = re.match(r'DELETE\s+(\w+)\s+WHERE\s+(.+)', sql, re.IGNORECASE)
     if delete_match:
-        table = delete_match.group(1)
+        table = _validate_identifier(delete_match.group(1))
         condition = delete_match.group(2)
         sql = f"DELETE FROM {table} WHERE {condition}"
         return sql, vars
