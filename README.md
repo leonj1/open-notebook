@@ -399,6 +399,11 @@ We welcome contributions! We're especially looking for help with:
 
 See our [Contributing Guide](CONTRIBUTING.md) for detailed information on how to get started.
 
+#### Automated Code Reviews
+- Pull requests targeting any branch receive an automatic CodeRabbit review.
+- Configuration lives in `.coderabbit.yaml` with `reviews.auto_review.enabled: true` and `base_branches: [".*"]`.
+- Bot feedback supplements, not replaces, human reviews from maintainers.
+
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
 
