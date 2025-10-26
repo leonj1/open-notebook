@@ -713,7 +713,7 @@ async def repo_insert(
         raise RuntimeError("Failed to insert records") from e
 
 
-async def repo_get_news_by_jota_id(jota_id: str) -> Dict[str, Any]:
+async def repo_get_news_by_jota_id(jota_id: str) -> List[Dict[str, Any]]:
     """Specialized query for news by jota_id"""
     try:
         results = await repo_query(
