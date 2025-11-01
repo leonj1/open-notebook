@@ -1,0 +1,8 @@
+node_modules/
+*.mp3
+*.wav
+*.log
+package-lock.json
+test-results/
+playwright-report/
+playwright/.cache/

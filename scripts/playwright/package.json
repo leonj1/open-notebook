@@ -1,0 +1,17 @@
+{
+  "name": "open-notebook-playwright-scripts",
+  "version": "1.0.0",
+  "description": "Playwright automation scripts for Open Notebook",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:headed": "playwright test --headed",
+    "submit-podcast": "node submit-url-and-podcast.js",
+    "submit-podcast-ui": "playwright test tests/submit-url-podcast-ui.spec.js"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.48.0",
+    "axios": "^1.7.0"
+  }
+}

@@ -5,7 +5,9 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from surreal_commands import registry
 
+from api.background_tasks import get_command_status_from_db
 from api.command_service import CommandService
+from open_notebook.database.repository_factory import get_database_type
 
 router = APIRouter()
 
@@ -26,7 +28,7 @@ class CommandJobStatusResponse(BaseModel):
     error_message: Optional[str] = None
     created: Optional[str] = None
     updated: Optional[str] = None
-    progress: Optional[Dict[str, Any]] = None
+    progress: Optional[int] = None  # Progress as integer (0-100)
 
 @router.post("/commands/jobs", response_model=CommandJobResponse)
 async def execute_command(request: CommandExecutionRequest):
@@ -69,9 +71,19 @@ async def execute_command(request: CommandExecutionRequest):
 async def get_command_job_status(job_id: str):
     """Get the status of a specific command job"""
     try:
-        status_data = await CommandService.get_command_status(job_id)
+        db_type = get_database_type()
+
+        if db_type == "sqlite":
+            # SQLite mode: Get status from database directly
+            logger.debug(f"Getting command status from SQLite for: {job_id}")
+            status_data = await get_command_status_from_db(job_id)
+        else:
+            # SurrealDB mode: Get status from surreal-commands
+            logger.debug(f"Getting command status from surreal-commands for: {job_id}")
+            status_data = await CommandService.get_command_status(job_id)
+
         return CommandJobStatusResponse(**status_data)
-        
+
     except Exception as e:
         logger.error(f"Error fetching job status: {str(e)}")
         raise HTTPException(

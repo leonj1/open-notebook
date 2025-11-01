@@ -4,6 +4,7 @@ from typing import Any, List, Optional
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -15,7 +16,13 @@ from fastapi.responses import FileResponse, Response
 from loguru import logger
 from surreal_commands import execute_command_sync
 
+from api.background_tasks import (
+    create_command_record,
+    get_command_status_from_db,
+    process_source_background,
+)
 from api.command_service import CommandService
+from open_notebook.database.repository_factory import get_database_type
 from api.models import (
     AssetModel,
     CreateSourceInsightRequest,
@@ -318,12 +325,14 @@ async def get_sources(
 
 @router.post("/sources", response_model=SourceResponse)
 async def create_source(
+    background_tasks: BackgroundTasks,
     form_data: tuple[SourceCreate, Optional[UploadFile]] = Depends(
         parse_source_form_data
     ),
 ):
     """Create a new source with support for both JSON and multipart form data."""
     source_data, upload_file = form_data
+    file_path = None  # Initialize here so exception handlers can access it
 
     try:
         # Verify all specified notebooks exist (backward compatibility support)
@@ -335,7 +344,6 @@ async def create_source(
                 )
 
         # Handle file upload if provided
-        file_path = None
         if upload_file and source_data.type == "upload":
             try:
                 file_path = await save_uploaded_file(upload_file)
@@ -388,9 +396,10 @@ async def create_source(
         # Branch based on processing mode
         if source_data.async_processing:
             # ASYNC PATH: Create source record first, then queue command
-            logger.info("Using async processing path")
+            db_type = get_database_type()
+            logger.info(f"Using async processing path with {db_type} database")
 
-            # Create minimal source record - let SurrealDB generate the ID
+            # Create minimal source record
             source = Source(
                 title=source_data.title or "Processing...",
                 topics=[],
@@ -398,35 +407,74 @@ async def create_source(
             await source.save()
 
             # Add source to notebooks immediately so it appears in the UI
-            # The source_graph will skip adding duplicates
             for notebook_id in (source_data.notebooks or []):
                 await source.add_to_notebook(notebook_id)
 
             try:
-                # Import command modules to ensure they're registered
-                import commands.source_commands  # noqa: F401
+                if db_type == "sqlite":
+                    # SQLite MODE: Use FastAPI BackgroundTasks
+                    logger.info("Using FastAPI BackgroundTasks for SQLite")
 
-                # Submit command for background processing
-                command_input = SourceProcessingInput(
-                    source_id=str(source.id),
-                    content_state=content_state,
-                    notebook_ids=source_data.notebooks,
-                    transformations=transformation_ids,
-                    embed=source_data.embed,
-                )
+                    # Create command record manually in SQLite
+                    command_input = {
+                        "source_id": str(source.id),
+                        "content_state": content_state,
+                        "notebook_ids": source_data.notebooks,
+                        "transformations": transformation_ids,
+                        "embed": source_data.embed,
+                    }
 
-                command_id = await CommandService.submit_command_job(
-                    "open_notebook",  # app name
-                    "process_source",  # command name
-                    command_input.model_dump(),
-                )
+                    command_id = await create_command_record(
+                        "open_notebook",
+                        "process_source",
+                        command_input,
+                    )
 
-                logger.info(f"Submitted async processing command: {command_id}")
+                    # Update source with command reference
+                    source.command = ensure_record_id(command_id)
+                    await source.save()
 
-                # Update source with command reference immediately
-                # command_id already includes 'command:' prefix
-                source.command = ensure_record_id(command_id)
-                await source.save()
+                    # Schedule background task
+                    background_tasks.add_task(
+                        process_source_background,
+                        command_id=command_id,
+                        source_id=str(source.id),
+                        content_state=content_state,
+                        notebook_ids=source_data.notebooks,
+                        transformation_ids=transformation_ids,
+                        embed=source_data.embed,
+                    )
+
+                    logger.info(f"Scheduled background task with command: {command_id}")
+
+                else:
+                    # SURREALDB MODE: Use surreal-commands worker
+                    logger.info("Using surreal-commands worker for SurrealDB")
+
+                    # Import command modules to ensure they're registered
+                    import commands.source_commands  # noqa: F401
+
+                    # Submit command for background processing
+                    command_input = SourceProcessingInput(
+                        source_id=str(source.id),
+                        content_state=content_state,
+                        notebook_ids=source_data.notebooks,
+                        transformations=transformation_ids,
+                        embed=source_data.embed,
+                    )
+
+                    command_id = await CommandService.submit_command_job(
+                        "open_notebook",  # app name
+                        "process_source",  # command name
+                        command_input.model_dump(),
+                    )
+
+                    logger.info(f"Submitted async processing command: {command_id}")
+
+                    # Update source with command reference
+                    # command_id already includes 'command:' prefix
+                    source.command = ensure_record_id(command_id)
+                    await source.save()
 
                 # Return source with command info
                 return SourceResponse(
@@ -440,8 +488,8 @@ async def create_source(
                     created=str(source.created),
                     updated=str(source.updated),
                     command_id=command_id,
-                    status="new",
-                    processing_info={"async": True, "queued": True},
+                    status="queued",
+                    processing_info={"async": True, "queued": True, "db_type": db_type},
                 )
 
             except Exception as e:
@@ -587,11 +635,11 @@ async def create_source(
 
 
 @router.post("/sources/json", response_model=SourceResponse)
-async def create_source_json(source_data: SourceCreate):
+async def create_source_json(background_tasks: BackgroundTasks, source_data: SourceCreate):
     """Create a new source using JSON payload (legacy endpoint for backward compatibility)."""
     # Convert to form data format and call main endpoint
     form_data = (source_data, None)
-    return await create_source(form_data)
+    return await create_source(background_tasks, form_data)
 
 
 async def _resolve_source_file(source_id: str) -> tuple[str, str]:

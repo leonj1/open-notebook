@@ -188,24 +188,17 @@ start-all:
 
 stop-sqlite:
 	@echo "🛑 Stopping Open Notebook (SQLite mode)..."
-	@pkill -f "next dev" || true
-	@pkill -f "run_api.py" || true
-	@pkill -f "uvicorn api.main:app" || true
+	@-pkill -f "next dev" 2>/dev/null
+	@-pkill -f "run_api.py" 2>/dev/null
+	@-pkill -f "uvicorn api.main:app" 2>/dev/null
 	@# Kill any processes on ports 5055 and 3006
-	@fuser -k 5055/tcp 2>/dev/null || true
-	@fuser -k 3006/tcp 2>/dev/null || true
+	@-fuser -k 5055/tcp 2>/dev/null
+	@-fuser -k 3006/tcp 2>/dev/null
 	@sleep 1
 	@echo "✅ SQLite services stopped!"
 
-restart-sqlite:
+restart-sqlite: stop-sqlite start-sqlite
 	@echo "🔄 Restarting Open Notebook (SQLite mode)..."
-	@# Kill processes without using pkill to avoid terminating make
-	@fuser -k 5055/tcp 2>/dev/null || true
-	@fuser -k 3006/tcp 2>/dev/null || true
-	@ps aux | grep -E "run_api.py|next dev" | grep -v grep | awk '{print $$2}' | xargs -r kill -9 2>/dev/null || true
-	@sleep 2
-	@echo "✅ Services stopped, starting fresh..."
-	@$(MAKE) start-sqlite
 
 stop-all:
 	@echo "🛑 Stopping all Open Notebook services..."

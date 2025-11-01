@@ -32,8 +32,8 @@ class TransformationState(TypedDict):
 
 async def content_process(state: SourceState) -> dict:
     content_settings = ContentSettings(
-        default_content_processing_engine_doc="auto",
-        default_content_processing_engine_url="auto",
+        default_content_processing_engine_doc="docling",
+        default_content_processing_engine_url="beautifulsoup",
         default_embedding_option="ask",
         auto_delete_files="yes",
         youtube_preferred_languages=["en", "pt", "es", "de", "nl", "en-GB", "fr", "hi", "ja"]
