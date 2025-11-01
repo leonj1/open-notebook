@@ -176,8 +176,10 @@ class TestPDFSourceProcessing:
             "embed": False,
         }
 
-        # Mock content-core's extract_content
-        with patch('open_notebook.graphs.source.extract_content') as mock_extract:
+        # Mock content-core's extract_content and PDFParserService
+        with patch('open_notebook.graphs.source.extract_content', new_callable=AsyncMock) as mock_extract, \
+             patch('open_notebook.graphs.source.get_pdf_parser_service') as mock_pdf:
+
             mock_extract.return_value = {
                 "file_path": str(txt_file),
                 "content": "Processed by content-core",
@@ -191,9 +193,7 @@ class TestPDFSourceProcessing:
             mock_extract.assert_called_once()
 
             # Verify PDFParserService was NOT called
-            with patch('open_notebook.graphs.source.get_pdf_parser_service') as mock_pdf:
-                # Re-run to ensure PDF service wasn't invoked
-                assert not mock_pdf.called
+            mock_pdf.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_content_process_pdf_fallback_on_error(self, test_pdf_path: Path):
@@ -212,31 +212,31 @@ class TestPDFSourceProcessing:
             "embed": False,
         }
 
-        # Mock PDFParserService to raise an exception
-        with patch('open_notebook.graphs.source.get_pdf_parser_service') as mock_get_service:
+        # Mock PDFParserService to raise an exception and content-core fallback
+        with patch('open_notebook.graphs.source.get_pdf_parser_service') as mock_get_service, \
+             patch('open_notebook.graphs.source.extract_content', new_callable=AsyncMock) as mock_extract:
+
             mock_service = MagicMock(spec=PDFParserService)
             mock_service.parse_pdf_to_markdown.side_effect = Exception("Parsing failed")
             mock_get_service.return_value = mock_service
 
-            # Mock content-core fallback
-            with patch('open_notebook.graphs.source.extract_content') as mock_extract:
-                mock_extract.return_value = {
-                    "file_path": str(test_pdf_path),
-                    "content": "Fallback content from content-core",
-                    "title": "Fallback Title",
-                    "url": "",
-                }
+            mock_extract.return_value = {
+                "file_path": str(test_pdf_path),
+                "content": "Fallback content from content-core",
+                "title": "Fallback Title",
+                "url": "",
+            }
 
-                result = await content_process(state)
+            result = await content_process(state)
 
-                # Verify PDFParserService was attempted
-                mock_get_service.assert_called_once()
+            # Verify PDFParserService was attempted
+            mock_get_service.assert_called_once()
 
-                # Verify fallback to content-core
-                mock_extract.assert_called_once()
+            # Verify fallback to content-core
+            mock_extract.assert_called_once()
 
-                # Verify result is from content-core
-                assert result["content_state"]["content"] == "Fallback content from content-core"
+            # Verify result is from content-core
+            assert result["content_state"]["content"] == "Fallback content from content-core"
 
     @pytest.mark.asyncio
     async def test_content_process_markdown_format(self, test_pdf_path: Path):
