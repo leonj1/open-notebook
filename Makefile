@@ -1,4 +1,4 @@
-.PHONY: run frontend check ruff database lint api start-all start-sqlite stop-all stop-sqlite restart-sqlite status clean-cache worker worker-start worker-stop worker-restart
+.PHONY: run frontend check ruff database lint api start-all start-sqlite stop-all stop-sqlite restart-sqlite status clean-cache worker worker-start worker-stop worker-restart test
 .PHONY: docker-buildx-prepare docker-buildx-clean docker-buildx-reset
 .PHONY: docker-push docker-push-latest docker-release tag export-docs
 
@@ -237,3 +237,7 @@ clean-cache:
 	@find . -name "*.pyo" -type f -delete 2>/dev/null || true
 	@find . -name "*.pyd" -type f -delete 2>/dev/null || true
 	@echo "✅ Cache directories cleaned!"
+
+test:
+	docker build -f Dockerfile.tests -t open-notebook-tests .
+	docker run --rm open-notebook-tests
