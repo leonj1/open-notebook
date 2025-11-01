@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from loguru import logger
 
 # Create a temporary file for SQLite database that persists across connections
 temp_db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -157,7 +158,7 @@ class TestPDFBackgroundProcessingIntegration:
             # Prepare content state for PDF processing
             content_state = {
                 "content_type": "file",
-                "asset_file_path": pdf_file_path,
+                "file_path": pdf_file_path,
                 "title": "Integration Test PDF"
             }
 
@@ -247,8 +248,8 @@ class TestPDFBackgroundProcessingIntegration:
                 zip(command_ids, source_ids, pdf_file_paths)
             ):
                 content_state = {
-                    "content_type": "file",
-                    "asset_file_path": pdf_file_path,
+                    "content_type": "file", 
+                    "file_path": pdf_file_path,
                     "title": f"Concurrent Test PDF {i+1}"
                 }
                 
@@ -303,6 +304,144 @@ class TestPDFBackgroundProcessingIntegration:
             pytest.fail(f"Database integrity verification failed: {e}")
 
     @pytest.mark.asyncio
+    async def test_source_save_with_real_database(self):
+        """Test direct source save operations with real SQLite database to catch corruption issues."""
+        # Set up test database
+        await self.setup_database()
+        
+        # Create a PDF file for testing
+        pdf_file_path = self.create_test_pdf_file()
+        
+        try:
+            from open_notebook.domain.notebook import Source
+            
+            # Test 1: Create and save a new source
+            source = Source(
+                title="Database Save Test PDF",
+                type="upload",
+                asset_file_path=pdf_file_path
+            )
+            await source.save()
+            original_id = str(source.id)
+            
+            # Test 2: Add to notebook (this tests the relationship saving)
+            await source.add_to_notebook(str(self.test_notebook.id))
+            
+            # Test 3: Update source with content and save again (this is what fails in production)
+            source.full_text = "This is processed PDF content from the test"
+            source.title = "Updated Database Save Test PDF"
+            
+            # This is the critical save operation that was failing
+            await source.save()
+            
+            # Test 4: Verify the source was actually updated in the database
+            saved_source = await Source.get(original_id)
+            assert saved_source is not None
+            assert saved_source.title == "Updated Database Save Test PDF"
+            assert saved_source.full_text == "This is processed PDF content from the test"
+            assert saved_source.asset_file_path == pdf_file_path
+            
+            # Test 5: Multiple save operations in sequence (stress test)
+            for i in range(5):
+                saved_source.title = f"Multiple Save Test {i}"
+                await saved_source.save()
+                
+                # Verify each save worked
+                check_source = await Source.get(original_id)
+                assert check_source.title == f"Multiple Save Test {i}"
+            
+            # Verify database integrity after all operations
+            await self._verify_database_integrity()
+            
+            logger.info("✅ Direct source save test completed successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Direct source save test failed: {e}")
+            logger.exception(e)
+            
+            # Still verify database integrity even after failure
+            await self._verify_database_integrity()
+            
+            raise
+            
+        finally:
+            if os.path.exists(pdf_file_path):
+                os.unlink(pdf_file_path)
+
+    @pytest.mark.asyncio
+    async def test_complete_pdf_source_graph_pipeline(self):
+        """Test the complete source_graph pipeline from start to finish with real database."""
+        # Set up test database
+        await self.setup_database()
+        
+        # Create a PDF file for testing
+        pdf_file_path = self.create_test_pdf_file()
+        
+        try:
+            from open_notebook.graphs.source import source_graph
+            from open_notebook.domain.notebook import Source
+            from open_notebook.domain.transformation import Transformation
+            
+            # Create a source but don't save it yet - let the graph handle that
+            source = Source(
+                title="Complete Pipeline Test PDF",
+                type="upload", 
+                asset_file_path=pdf_file_path
+            )
+            # Save the source first so it has an ID
+            await source.save()
+            await source.add_to_notebook(str(self.test_notebook.id))
+            
+            # Prepare input for the complete source graph pipeline
+            input_state = {
+                "content_state": {
+                    "content_type": "file",
+                    "file_path": pdf_file_path,
+                    "title": "Complete Pipeline Test PDF"
+                },
+                "notebook_ids": self.notebook_ids,
+                "apply_transformations": [],  # No transformations for this test
+                "embed": True,  # Test embedding functionality
+                "source_id": str(source.id)
+            }
+            
+            # Execute the complete source graph pipeline
+            result = await source_graph.ainvoke(input_state)
+            
+            # Verify the pipeline completed successfully
+            assert "source" in result
+            processed_source = result["source"]
+            
+            # Verify the source exists in the database with updated content
+            saved_source = await Source.get(str(processed_source.id))
+            assert saved_source is not None
+            assert saved_source.id == processed_source.id
+            
+            # Check if the source has been processed (should have content)
+            if saved_source.full_text:
+                logger.info(f"✅ Source processed with content length: {len(saved_source.full_text)}")
+            else:
+                logger.warning("⚠️ Source processed but no full_text content found")
+                
+            # Verify database integrity after complete pipeline
+            await self._verify_database_integrity()
+            
+            logger.info("✅ Complete source graph pipeline test passed")
+            
+        except Exception as e:
+            logger.error(f"❌ Complete source graph pipeline failed: {e}")
+            logger.exception(e)
+            
+            # Verify database integrity even after failure
+            await self._verify_database_integrity()
+            
+            raise
+            
+        finally:
+            if os.path.exists(pdf_file_path):
+                os.unlink(pdf_file_path)
+
+    @pytest.mark.asyncio
     async def test_pdf_processing_with_embedding_stress_test(self):
         """Stress test PDF processing with large number of chunks to trigger vectorization issues."""
         # Set up test database
@@ -337,7 +476,7 @@ class TestPDFBackgroundProcessingIntegration:
 
             content_state = {
                 "content_type": "file",
-                "asset_file_path": pdf_file_path,
+                "file_path": pdf_file_path,
                 "title": "Large PDF Stress Test"
             }
 
