@@ -23,13 +23,13 @@ os.environ["DB_TYPE"] = "sqlite"
 os.environ["SQLITE_URL"] = f"sqlite:///{temp_db_path}"
 
 from api.background_tasks import (
-    _ensure_command_table,
     create_command_record,
     get_command_status_from_db,
     process_source_background,
     update_command_status,
 )
 from api.main import app
+from open_notebook.services import CommandTableService
 
 
 def teardown_module():
@@ -45,9 +45,9 @@ class TestBackgroundTasksSQLite:
 
     @pytest.mark.asyncio
     async def test_ensure_command_table_creates_table(self):
-        """Test that _ensure_command_table creates the command table."""
+        """Test that CommandTableService.ensure_table creates the command table."""
         # This should not raise an error
-        await _ensure_command_table()
+        await CommandTableService.ensure_table()
 
         # Verify we can query the table (even if empty)
         from open_notebook.database.repository_factory import repo_query
@@ -58,7 +58,7 @@ class TestBackgroundTasksSQLite:
     @pytest.mark.asyncio
     async def test_create_command_record(self):
         """Test creating a command record in SQLite."""
-        await _ensure_command_table()
+        await CommandTableService.ensure_table()
 
         command_id = await create_command_record(
             app="test_app",
@@ -72,7 +72,7 @@ class TestBackgroundTasksSQLite:
     @pytest.mark.asyncio
     async def test_create_and_retrieve_command_status(self):
         """Test creating a command and retrieving its status."""
-        await _ensure_command_table()
+        await CommandTableService.ensure_table()
 
         # Create command
         command_id = await create_command_record(
@@ -92,7 +92,7 @@ class TestBackgroundTasksSQLite:
     @pytest.mark.asyncio
     async def test_update_command_status_progress(self):
         """Test updating command status with progress."""
-        await _ensure_command_table()
+        await CommandTableService.ensure_table()
 
         # Create command
         command_id = await create_command_record(
@@ -110,7 +110,7 @@ class TestBackgroundTasksSQLite:
     @pytest.mark.asyncio
     async def test_update_command_status_with_result(self):
         """Test updating command status with result data."""
-        await _ensure_command_table()
+        await CommandTableService.ensure_table()
 
         # Create command
         command_id = await create_command_record(
@@ -131,7 +131,7 @@ class TestBackgroundTasksSQLite:
     @pytest.mark.asyncio
     async def test_update_command_status_with_error(self):
         """Test updating command status with error message."""
-        await _ensure_command_table()
+        await CommandTableService.ensure_table()
 
         # Create command
         command_id = await create_command_record(
@@ -224,7 +224,7 @@ class TestBackgroundThreadWithRealPDF:
     @pytest.mark.asyncio
     async def test_process_source_background_real_pdf_sqlite(self):
         # Ensure command table exists
-        await _ensure_command_table()
+        await CommandTableService.ensure_table()
 
         # Create minimal notebook and source
         from open_notebook.domain.notebook import Notebook, Source
@@ -403,7 +403,7 @@ class TestCommandsAPIWithSQLite:
     @pytest.mark.asyncio
     async def test_get_command_status_sqlite_mode(self):
         """Test retrieving command status in SQLite mode."""
-        await _ensure_command_table()
+        await CommandTableService.ensure_table()
 
         # Create a test command
         command_id = await create_command_record(

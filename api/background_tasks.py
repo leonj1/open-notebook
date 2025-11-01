@@ -17,39 +17,12 @@ from loguru import logger
 from open_notebook.database.repository_factory import (
     get_database_type,
     repo_create,
-    repo_ensure_table,
     repo_query,
     repo_update,
 )
 from open_notebook.domain.transformation import Transformation
 from open_notebook.graphs.source import source_graph
-
-
-async def _ensure_command_table():
-    """Ensure the command table exists without relying on pre-query.
-
-    Using CREATE TABLE IF NOT EXISTS is idempotent and avoids OperationalError logs
-    from querying a non-existent table during startup or first use.
-
-    For SurrealDB, this is a no-op since tables are created automatically.
-    For SQLite, this creates the table if it doesn't exist.
-    """
-    create_table_sql = """
-    CREATE TABLE IF NOT EXISTS command (
-        id TEXT PRIMARY KEY,
-        app TEXT NOT NULL,
-        command TEXT NOT NULL,
-        status TEXT NOT NULL,
-        input TEXT,
-        result TEXT,
-        error_message TEXT,
-        progress INTEGER DEFAULT 0,
-        created TEXT NOT NULL,
-        updated TEXT NOT NULL
-    )
-    """
-
-    await repo_ensure_table("command", create_table_sql)
+from open_notebook.services import CommandTableService
 
 
 async def create_command_record(
@@ -59,7 +32,7 @@ async def create_command_record(
 ) -> str:
     """Create a command record in the database for tracking"""
     # Ensure command table exists (SQLite only)
-    await _ensure_command_table()
+    await CommandTableService.ensure_table()
 
     # For SQLite, serialize dict fields to JSON strings
     db_type = get_database_type()
