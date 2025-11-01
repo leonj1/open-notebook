@@ -22,12 +22,7 @@ temp_db_file.close()
 os.environ["DB_TYPE"] = "sqlite"
 os.environ["SQLITE_URL"] = f"sqlite:///{temp_db_path}"
 
-from api.background_tasks import (
-    create_command_record,
-    get_command_status_from_db,
-    process_source_background,
-    update_command_status,
-)
+from api.background_tasks import process_source_background
 from api.main import app
 from open_notebook.services import CommandTableService
 
@@ -60,7 +55,7 @@ class TestBackgroundTasksSQLite:
         """Test creating a command record in SQLite."""
         await CommandTableService.ensure_table()
 
-        command_id = await create_command_record(
+        command_id = await CommandTableService.create_command_record(
             app="test_app",
             command_name="test_command",
             input_data={"key": "value", "number": 42},
@@ -75,14 +70,14 @@ class TestBackgroundTasksSQLite:
         await CommandTableService.ensure_table()
 
         # Create command
-        command_id = await create_command_record(
+        command_id = await CommandTableService.create_command_record(
             app="test_app",
             command_name="test_command",
             input_data={"test": "data"},
         )
 
         # Retrieve status
-        status = await get_command_status_from_db(command_id)
+        status = await CommandTableService.get_command_status(command_id)
 
         assert status["job_id"] == command_id
         assert status["status"] == "queued"
@@ -95,15 +90,15 @@ class TestBackgroundTasksSQLite:
         await CommandTableService.ensure_table()
 
         # Create command
-        command_id = await create_command_record(
+        command_id = await CommandTableService.create_command_record(
             app="test_app", command_name="test_command", input_data={}
         )
 
         # Update to running with progress
-        await update_command_status(command_id, "running", progress=50)
+        await CommandTableService.update_command_status(command_id, "running", progress=50)
 
         # Verify update
-        status = await get_command_status_from_db(command_id)
+        status = await CommandTableService.get_command_status(command_id)
         assert status["status"] == "running"
         assert status["progress"] == 50
 
@@ -113,16 +108,16 @@ class TestBackgroundTasksSQLite:
         await CommandTableService.ensure_table()
 
         # Create command
-        command_id = await create_command_record(
+        command_id = await CommandTableService.create_command_record(
             app="test_app", command_name="test_command", input_data={}
         )
 
         # Update with result
         result_data = {"success": True, "processed_items": 10}
-        await update_command_status(command_id, "completed", progress=100, result=result_data)
+        await CommandTableService.update_command_status(command_id, "completed", progress=100, result=result_data)
 
         # Verify update
-        status = await get_command_status_from_db(command_id)
+        status = await CommandTableService.get_command_status(command_id)
         assert status["status"] == "completed"
         assert status["progress"] == 100
         assert status["result"]["success"] is True
@@ -134,16 +129,16 @@ class TestBackgroundTasksSQLite:
         await CommandTableService.ensure_table()
 
         # Create command
-        command_id = await create_command_record(
+        command_id = await CommandTableService.create_command_record(
             app="test_app", command_name="test_command", input_data={}
         )
 
         # Update with error
         error_msg = "Something went wrong"
-        await update_command_status(command_id, "failed", error_message=error_msg)
+        await CommandTableService.update_command_status(command_id, "failed", error_message=error_msg)
 
         # Verify update
-        status = await get_command_status_from_db(command_id)
+        status = await CommandTableService.get_command_status(command_id)
         assert status["status"] == "failed"
         assert status["error_message"] == error_msg
 
@@ -241,7 +236,7 @@ class TestBackgroundThreadWithRealPDF:
             await src.add_to_notebook(str(nb.id))
 
             # Create command and run background processing with real SQLite
-            command_id = await create_command_record(
+            command_id = await CommandTableService.create_command_record(
                 app="open_notebook",
                 command_name="process_source",
                 input_data={
@@ -268,7 +263,7 @@ class TestBackgroundThreadWithRealPDF:
             )
 
             # Verify outcome: completed or failed but not due to DB corruption
-            status = await get_command_status_from_db(command_id)
+            status = await CommandTableService.get_command_status(command_id)
             assert status["status"] in ["completed", "failed"]
             if status["status"] == "failed":
                 err = status.get("error_message") or ""
@@ -294,7 +289,7 @@ class TestSourcesAPIAsyncProcessing:
 
     @patch("api.routers.sources.Source")
     @patch("api.routers.sources.Notebook")
-    @patch("api.routers.sources.create_command_record")
+    @patch("api.routers.sources.CommandTableService.create_command_record")
     def test_create_source_with_async_processing_sqlite(
         self, mock_create_command, mock_notebook, mock_source
     ):
@@ -315,7 +310,9 @@ class TestSourcesAPIAsyncProcessing:
         mock_source.return_value = mock_source_instance
 
         # Mock command creation
-        mock_create_command.return_value = "command:abc-123"
+        async def mock_create(app, command, input_data):
+            return "command:abc-123"
+        mock_create_command.side_effect = mock_create
 
         # Make request
         response = self.client.post(
@@ -406,14 +403,14 @@ class TestCommandsAPIWithSQLite:
         await CommandTableService.ensure_table()
 
         # Create a test command
-        command_id = await create_command_record(
+        command_id = await CommandTableService.create_command_record(
             app="test_app",
             command_name="test_command",
             input_data={"test": "data"},
         )
 
         # Update it to completed
-        await update_command_status(
+        await CommandTableService.update_command_status(
             command_id,
             "completed",
             progress=100,

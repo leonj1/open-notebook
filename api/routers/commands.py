@@ -5,9 +5,9 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from surreal_commands import registry
 
-from api.background_tasks import get_command_status_from_db
 from api.command_service import CommandService
 from open_notebook.database.repository_factory import get_database_type
+from open_notebook.services import CommandTableService
 
 router = APIRouter()
 
@@ -76,7 +76,7 @@ async def get_command_job_status(job_id: str):
         if db_type == "sqlite":
             # SQLite mode: Get status from database directly
             logger.debug(f"Getting command status from SQLite for: {job_id}")
-            status_data = await get_command_status_from_db(job_id)
+            status_data = await CommandTableService.get_command_status(job_id)
         else:
             # SurrealDB mode: Get status from surreal-commands
             logger.debug(f"Getting command status from surreal-commands for: {job_id}")

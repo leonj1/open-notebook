@@ -24,12 +24,9 @@ temp_db_file.close()
 os.environ["DB_TYPE"] = "sqlite"
 os.environ["SQLITE_URL"] = f"sqlite:///{temp_db_path}"
 
-from api.background_tasks import (
-    create_command_record,
-    get_command_status_from_db,
-    process_source_background,
-)
+from api.background_tasks import process_source_background
 from open_notebook.database.repository_factory import repo_create, repo_query
+from open_notebook.services import CommandTableService
 from open_notebook.domain.notebook import Notebook, Source
 
 
@@ -144,7 +141,7 @@ class TestPDFBackgroundProcessingIntegration:
             await source.add_to_notebook(str(self.test_notebook.id))
 
             # Create command record for background processing
-            command_id = await create_command_record(
+            command_id = await CommandTableService.create_command_record(
                 app="open_notebook",
                 command_name="process_source",
                 input_data={
@@ -173,7 +170,7 @@ class TestPDFBackgroundProcessingIntegration:
             )
 
             # Verify command completed successfully
-            command_status = await get_command_status_from_db(command_id)
+            command_status = await CommandTableService.get_command_status(command_id)
             
             # Check if processing completed without database corruption
             assert command_status["status"] in ["completed", "failed"], (
@@ -230,7 +227,7 @@ class TestPDFBackgroundProcessingIntegration:
                 source_ids.append(str(source.id))
 
                 # Create command record
-                command_id = await create_command_record(
+                command_id = await CommandTableService.create_command_record(
                     app="open_notebook",
                     command_name="process_source",
                     input_data={
@@ -271,7 +268,7 @@ class TestPDFBackgroundProcessingIntegration:
             
             # Check all command statuses
             for command_id in command_ids:
-                command_status = await get_command_status_from_db(command_id)
+                command_status = await CommandTableService.get_command_status(command_id)
                 assert command_status["status"] in ["completed", "failed"]
                 
                 if command_status["status"] == "failed":
@@ -495,7 +492,7 @@ class TestPDFBackgroundProcessingIntegration:
             await source.add_to_notebook(str(self.test_notebook.id))
 
             # Create command
-            command_id = await create_command_record(
+            command_id = await CommandTableService.create_command_record(
                 app="open_notebook",
                 command_name="process_source",
                 input_data={
@@ -531,7 +528,7 @@ class TestPDFBackgroundProcessingIntegration:
             # Verify database integrity after stress test
             await self._verify_database_integrity()
             
-            command_status = await get_command_status_from_db(command_id)
+            command_status = await CommandTableService.get_command_status(command_id)
             if command_status["status"] == "failed":
                 error_msg = command_status.get("error_message", "")
                 assert "database disk image is malformed" not in error_msg, (

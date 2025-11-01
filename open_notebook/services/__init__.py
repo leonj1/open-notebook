@@ -6,5 +6,6 @@ and database operations.
 """
 
 from .command_table_service import CommandTableService
+from .source_processor_service import SourceProcessorService
 
-__all__ = ["CommandTableService"]
+__all__ = ["CommandTableService", "SourceProcessorService"]

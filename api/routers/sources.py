@@ -16,12 +16,9 @@ from fastapi.responses import FileResponse, Response
 from loguru import logger
 from surreal_commands import execute_command_sync
 
-from api.background_tasks import (
-    create_command_record,
-    get_command_status_from_db,
-    process_source_background,
-)
+from api.background_tasks import process_source_background
 from api.command_service import CommandService
+from open_notebook.services import CommandTableService
 from open_notebook.database.repository_factory import get_database_type
 from api.models import (
     AssetModel,
@@ -424,7 +421,7 @@ async def create_source(
                         "embed": source_data.embed,
                     }
 
-                    command_id = await create_command_record(
+                    command_id = await CommandTableService.create_command_record(
                         "open_notebook",
                         "process_source",
                         command_input,
