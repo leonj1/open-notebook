@@ -26,6 +26,7 @@ from api.background_tasks import (
     _ensure_command_table,
     create_command_record,
     get_command_status_from_db,
+    process_source_background,
     update_command_status,
 )
 from api.main import app
@@ -145,6 +146,143 @@ class TestBackgroundTasksSQLite:
         status = await get_command_status_from_db(command_id)
         assert status["status"] == "failed"
         assert status["error_message"] == error_msg
+
+
+class TestBackgroundThreadWithRealPDF:
+    """Unit tests for the background thread using a real PDF and SQLite (minimal mocks)."""
+
+    def create_test_pdf_file(self) -> str:
+        pdf_content = (
+            b"%PDF-1.4\n"
+            b"1 0 obj\n"
+            b"<<\n"
+            b"/Type /Catalog\n"
+            b"/Pages 2 0 R\n"
+            b">>\n"
+            b"endobj\n"
+            b"2 0 obj\n"
+            b"<<\n"
+            b"/Type /Pages\n"
+            b"/Kids [3 0 R]\n"
+            b"/Count 1\n"
+            b">>\n"
+            b"endobj\n"
+            b"3 0 obj\n"
+            b"<<\n"
+            b"/Type /Page\n"
+            b"/Parent 2 0 R\n"
+            b"/MediaBox [0 0 612 792]\n"
+            b"/Contents 4 0 R\n"
+            b"/Resources <<\n"
+            b"/Font <<\n"
+            b"/F1 5 0 R\n"
+            b">>\n"
+            b">>\n"
+            b">>\n"
+            b"endobj\n"
+            b"4 0 obj\n"
+            b"<<\n"
+            b"/Length 44\n"
+            b">>\n"
+            b"stream\n"
+            b"BT\n"
+            b"/F1 12 Tf\n"
+            b"100 700 Td\n"
+            b"(Hello World from PDF!) Tj\n"
+            b"ET\n"
+            b"endstream\n"
+            b"endobj\n"
+            b"5 0 obj\n"
+            b"<<\n"
+            b"/Type /Font\n"
+            b"/Subtype /Type1\n"
+            b"/BaseFont /Helvetica\n"
+            b">>\n"
+            b"endobj\n"
+            b"xref\n"
+            b"0 6\n"
+            b"0000000000 65535 f \n"
+            b"0000000010 00000 n \n"
+            b"0000000079 00000 n \n"
+            b"0000000173 00000 n \n"
+            b"0000000301 00000 n \n"
+            b"0000000380 00000 n \n"
+            b"trailer\n"
+            b"<<\n"
+            b"/Size 6\n"
+            b"/Root 1 0 R\n"
+            b">>\n"
+            b"startxref\n"
+            b"492\n"
+            b"%%EOF\n"
+        )
+
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pdf", delete=False) as f:
+            f.write(pdf_content)
+            return f.name
+
+    @pytest.mark.asyncio
+    async def test_process_source_background_real_pdf_sqlite(self):
+        # Ensure command table exists
+        await _ensure_command_table()
+
+        # Create minimal notebook and source
+        from open_notebook.domain.notebook import Notebook, Source
+        from open_notebook.database.repository_factory import repo_query
+
+        nb = Notebook(name="BG Thread Test NB", description="Unit test notebook")
+        await nb.save()
+        notebook_ids = [str(nb.id)]
+
+        pdf_path = self.create_test_pdf_file()
+        try:
+            src = Source(title="BG Thread PDF", topics=[])
+            await src.save()
+            await src.add_to_notebook(str(nb.id))
+
+            # Create command and run background processing with real SQLite
+            command_id = await create_command_record(
+                app="open_notebook",
+                command_name="process_source",
+                input_data={
+                    "source_id": str(src.id),
+                    "notebook_ids": notebook_ids,
+                    "embed": False,
+                    "transformation_ids": [],
+                },
+            )
+
+            content_state = {
+                "content_type": "file",
+                "file_path": pdf_path,
+                "title": "BG Thread PDF",
+            }
+
+            await process_source_background(
+                command_id=command_id,
+                source_id=str(src.id),
+                content_state=content_state,
+                notebook_ids=notebook_ids,
+                transformation_ids=[],
+                embed=False,
+            )
+
+            # Verify outcome: completed or failed but not due to DB corruption
+            status = await get_command_status_from_db(command_id)
+            assert status["status"] in ["completed", "failed"]
+            if status["status"] == "failed":
+                err = status.get("error_message") or ""
+                assert "database disk image is malformed" not in err
+
+            # Ensure database integrity is OK
+            integrity = await repo_query("PRAGMA integrity_check", {})
+            assert len(integrity) > 0
+            first = integrity[0]
+            integrity_status = list(first.values())[0]
+            assert integrity_status == "ok"
+        finally:
+            if os.path.exists(pdf_path):
+                os.unlink(pdf_path)
 
 
 class TestSourcesAPIAsyncProcessing:

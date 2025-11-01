@@ -58,6 +58,7 @@ repo_upsert = _repo.repo_upsert
 repo_update = _repo.repo_update
 repo_delete = _repo.repo_delete
 repo_insert = _repo.repo_insert
+repo_ensure_table = _repo.repo_ensure_table
 parse_record_ids = _repo.parse_record_ids
 ensure_record_id = _repo.ensure_record_id
 

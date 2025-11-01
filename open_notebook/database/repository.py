@@ -180,3 +180,19 @@ async def repo_insert(
             return []
         logger.exception(e)
         raise RuntimeError("Failed to create record")
+
+
+async def repo_ensure_table(table: str, schema_sql: str) -> None:
+    """
+    Ensure a table exists with given schema (idempotent).
+
+    For SurrealDB, this is a no-op since SurrealDB creates tables
+    automatically on first insert. Schema is schemaless by default.
+
+    Args:
+        table: Table name (unused in SurrealDB)
+        schema_sql: Schema definition (unused in SurrealDB)
+    """
+    # SurrealDB creates tables automatically, no action needed
+    logger.debug(f"SurrealDB auto-creates tables - skipping ensure_table for '{table}'")
+    pass

@@ -17,6 +17,7 @@ from loguru import logger
 from open_notebook.database.repository_factory import (
     get_database_type,
     repo_create,
+    repo_ensure_table,
     repo_query,
     repo_update,
 )
@@ -25,39 +26,30 @@ from open_notebook.graphs.source import source_graph
 
 
 async def _ensure_command_table():
-    """Ensure the command table exists in SQLite"""
-    db_type = get_database_type()
-    if db_type != "sqlite":
-        return  # Only needed for SQLite
+    """Ensure the command table exists without relying on pre-query.
 
-    try:
-        # Try to query the command table
-        await repo_query("SELECT 1 FROM command LIMIT 1", {})
-    except Exception:
-        # Table doesn't exist, create it
-        logger.info("Creating command table for SQLite")
-        from open_notebook.database.repository_factory import db_connection
+    Using CREATE TABLE IF NOT EXISTS is idempotent and avoids OperationalError logs
+    from querying a non-existent table during startup or first use.
 
-        async with db_connection() as conn:
-            import asyncio
+    For SurrealDB, this is a no-op since tables are created automatically.
+    For SQLite, this creates the table if it doesn't exist.
+    """
+    create_table_sql = """
+    CREATE TABLE IF NOT EXISTS command (
+        id TEXT PRIMARY KEY,
+        app TEXT NOT NULL,
+        command TEXT NOT NULL,
+        status TEXT NOT NULL,
+        input TEXT,
+        result TEXT,
+        error_message TEXT,
+        progress INTEGER DEFAULT 0,
+        created TEXT NOT NULL,
+        updated TEXT NOT NULL
+    )
+    """
 
-            create_table_sql = """
-            CREATE TABLE IF NOT EXISTS command (
-                id TEXT PRIMARY KEY,
-                app TEXT NOT NULL,
-                command TEXT NOT NULL,
-                status TEXT NOT NULL,
-                input TEXT,
-                result TEXT,
-                error_message TEXT,
-                progress INTEGER DEFAULT 0,
-                created TEXT NOT NULL,
-                updated TEXT NOT NULL
-            )
-            """
-            await asyncio.to_thread(conn.execute, create_table_sql)
-            await asyncio.to_thread(conn.commit)
-        logger.info("Command table created successfully")
+    await repo_ensure_table("command", create_table_sql)
 
 
 async def create_command_record(

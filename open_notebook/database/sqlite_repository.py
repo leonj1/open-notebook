@@ -724,3 +724,33 @@ async def repo_get_news_by_jota_id(jota_id: str) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("Unexpected error fetching news by jota_id")
         raise RuntimeError("Failed to fetch record") from e
+
+
+async def repo_ensure_table(table: str, schema_sql: str) -> None:
+    """
+    Ensure a table exists with given schema (idempotent).
+    Uses CREATE TABLE IF NOT EXISTS to avoid errors if table already exists.
+
+    Args:
+        table: Table name (for validation)
+        schema_sql: Complete CREATE TABLE IF NOT EXISTS SQL statement
+
+    Raises:
+        RuntimeError: If table creation fails
+    """
+    try:
+        # Validate table name to prevent SQL injection
+        _validate_identifier(table)
+
+        async with db_connection() as conn:
+            await asyncio.to_thread(conn.execute, schema_sql)
+            await asyncio.to_thread(conn.commit)
+
+        logger.debug(f"Ensured table '{table}' exists")
+
+    except sqlite3.OperationalError as e:
+        logger.exception(f"Operational error ensuring table '{table}'")
+        raise RuntimeError(f"Failed to ensure table '{table}' (operational error)") from e
+    except Exception as e:
+        logger.exception(f"Unexpected error ensuring table '{table}'")
+        raise RuntimeError(f"Failed to ensure table '{table}'") from e
