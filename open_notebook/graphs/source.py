@@ -1,4 +1,5 @@
 import operator
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from content_core import extract_content
@@ -9,6 +10,7 @@ from langgraph.types import Send
 from loguru import logger
 from typing_extensions import Annotated, TypedDict
 
+from api.pdf_parser_service import get_pdf_parser_service
 from open_notebook.domain.content_settings import ContentSettings
 from open_notebook.domain.notebook import Asset, Source
 from open_notebook.domain.transformation import Transformation
@@ -40,6 +42,43 @@ async def content_process(state: SourceState) -> dict:
     )
     content_state: Dict[str, Any] = state["content_state"]  # type: ignore[assignment]
 
+    # Check if this is a PDF file - if so, use our dedicated PDFParserService
+    file_path = content_state.get("file_path")
+    if file_path and Path(file_path).suffix.lower() == ".pdf":
+        logger.info(f"Using PDFParserService (docling-parse) for PDF: {file_path}")
+
+        try:
+            # Use our dedicated PDF parser service (docling-only)
+            pdf_service = get_pdf_parser_service()
+            markdown_content = pdf_service.parse_pdf_to_markdown(
+                file_path=file_path,
+                extract_level="line"  # Use line-level extraction for better formatting
+            )
+
+            # Extract title from filename if not provided
+            title = content_state.get("title") or Path(file_path).stem
+
+            # Create ProcessSourceState compatible with content-core format
+            processed_state: ProcessSourceState = {
+                "url": content_state.get("url", ""),
+                "file_path": file_path,
+                "content": markdown_content,
+                "title": title,
+            }
+
+            logger.info(
+                f"Successfully parsed PDF with docling-parse: "
+                f"{len(markdown_content)} characters extracted"
+            )
+
+            return {"content_state": processed_state}
+
+        except Exception as e:
+            logger.error(f"PDFParserService failed for {file_path}: {e}")
+            logger.info("Falling back to content-core for PDF processing")
+            # Fall through to content-core on error
+
+    # For non-PDF files or if PDF parsing failed, use content-core
     content_state["url_engine"] = (
         content_settings.default_content_processing_engine_url or "auto"
     )
