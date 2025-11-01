@@ -58,8 +58,8 @@ async def content_process(state: SourceState) -> dict:
             # Extract title from filename if not provided
             title = content_state.get("title") or Path(file_path).stem
 
-            # Create processed state compatible with content-core format
-            processed_state = {
+            # Create ProcessSourceState compatible with content-core format
+            processed_state: ProcessSourceState = {
                 "url": content_state.get("url", ""),
                 "file_path": file_path,
                 "content": markdown_content,
