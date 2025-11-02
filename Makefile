@@ -188,12 +188,15 @@ start-all:
 
 stop-sqlite:
 	@echo "🛑 Stopping Open Notebook (SQLite mode)..."
-	@-pkill -f "next dev" 2>/dev/null
-	@-pkill -f "run_api.py" 2>/dev/null
-	@-pkill -f "uvicorn api.main:app" 2>/dev/null
-	@# Kill any processes on ports 5055 and 3006
-	@-fuser -k 5055/tcp 2>/dev/null
-	@-fuser -k 3006/tcp 2>/dev/null
+	@echo "Stopping Next.js frontend..."
+	@-pkill -9 -f "next dev" 2>/dev/null || true
+	@-pkill -9 -f "node.*next-server" 2>/dev/null || true
+	@echo "Stopping API backend..."
+	@-pkill -9 -f "run_api.py" 2>/dev/null || true
+	@-pkill -9 -f "uvicorn api.main:app" 2>/dev/null || true
+	@echo "Killing any processes on ports 5055 and 3006..."
+	@-lsof -ti:5055 | xargs -r kill -9 2>/dev/null || true
+	@-lsof -ti:3006 | xargs -r kill -9 2>/dev/null || true
 	@sleep 1
 	@echo "✅ SQLite services stopped!"
 
