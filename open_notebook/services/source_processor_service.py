@@ -7,11 +7,42 @@ executing the source graph, and tracking progress via command status updates.
 
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Type
+from typing import Any, Dict, List, Optional, Protocol, Type
 
 from loguru import logger
 
 from open_notebook.domain.transformation import Transformation
+
+
+class CommandService(Protocol):
+    """Protocol defining the interface for command status tracking services."""
+
+    @staticmethod
+    async def update_command_status(
+        command_id: str,
+        status: str,
+        progress: Optional[int] = None,
+        result: Optional[Dict[str, Any]] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """Update command status in the database."""
+        ...
+
+
+class SourceGraph(Protocol):
+    """Protocol defining the interface for source processing graphs."""
+
+    async def ainvoke(self, input: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute the graph asynchronously.
+
+        Args:
+            input: Input dictionary containing processing parameters
+
+        Returns:
+            Dict containing 'source' key with processed Source object
+        """
+        ...
 
 
 class SourceProcessorService:
@@ -30,20 +61,20 @@ class SourceProcessorService:
 
     def __init__(
         self,
-        command_service: Any,
+        command_service: CommandService,
         transformation_loader: Type[Transformation],
-        source_graph: Any,
+        source_graph: SourceGraph,
     ):
         """
         Initialize the source processor service with required dependencies.
 
         Args:
             command_service: Service for updating command status (e.g., CommandTableService)
-                Must have an async update_command_status(command_id, status, progress, result, error_message) method
+                Must implement the CommandService protocol
             transformation_loader: Class for loading transformation objects (e.g., Transformation)
                 Must have an async get(transformation_id) class method
             source_graph: Graph executor for processing sources
-                Must have an async ainvoke(input_dict) method that returns a dict with 'source' key
+                Must implement the SourceGraph protocol
         """
         self.command_service = command_service
         self.transformation_loader = transformation_loader

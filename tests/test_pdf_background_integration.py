@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import pytest_asyncio
 from loguru import logger
 
 # Create a temporary file for SQLite database that persists across connections
@@ -26,6 +27,7 @@ os.environ["SQLITE_URL"] = f"sqlite:///{temp_db_path}"
 
 from api.background_tasks import process_source_background
 from open_notebook.database.repository_factory import repo_create, repo_query
+from open_notebook.database.sqlite_repository import close_connection_pool
 from open_notebook.services import CommandTableService
 from open_notebook.domain.notebook import Notebook, Source
 
@@ -38,6 +40,33 @@ def teardown_module():
 
 class TestPDFBackgroundProcessingIntegration:
     """Integration test suite for PDF background processing with real SQLite."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def setup_and_teardown(self):
+        """Setup and teardown for each test to ensure clean state."""
+        # Close any existing connection pools
+        await close_connection_pool()
+
+        # Remove the database file to start fresh
+        if os.path.exists(temp_db_path):
+            try:
+                os.unlink(temp_db_path)
+            except:
+                pass
+            # Also remove WAL files
+            for ext in ['-wal', '-shm']:
+                wal_file = temp_db_path + ext
+                if os.path.exists(wal_file):
+                    try:
+                        os.unlink(wal_file)
+                    except:
+                        pass
+
+        # Yield control to the test
+        yield
+
+        # Cleanup after test
+        await close_connection_pool()
 
     async def setup_database(self):
         """Set up test database with notebooks and clean state."""

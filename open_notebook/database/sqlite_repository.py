@@ -26,6 +26,257 @@ from loguru import logger
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+class SQLiteConnectionPool:
+    """
+    Thread-safe SQLite connection pool with single-writer pattern.
+
+    This pool manages SQLite connections to prevent database corruption from
+    concurrent writes. It uses:
+    - A single dedicated connection for all write operations (serialized via queue)
+    - Multiple read-only connections for concurrent reads
+    - WAL mode for better concurrency support
+
+    The single-writer pattern ensures that all writes are serialized, preventing
+    the "database disk image is malformed" error that occurs with concurrent writes.
+    """
+
+    def __init__(self, db_path: str, max_readers: int = 5):
+        """
+        Initialize the connection pool.
+
+        Args:
+            db_path: Path to the SQLite database file
+            max_readers: Maximum number of concurrent read connections
+        """
+        self.db_path = db_path
+        self.max_readers = max_readers
+        self._writer_conn: Optional[sqlite3.Connection] = None
+        self._reader_pool: List[sqlite3.Connection] = []
+        self._write_lock = asyncio.Lock()
+        self._write_queue: asyncio.Queue = asyncio.Queue()
+        self._writer_task: Optional[asyncio.Task] = None
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._initialized = False
+        self._closed = False
+
+    async def initialize(self):
+        """Initialize the connection pool and start the writer task."""
+        current_loop = asyncio.get_running_loop()
+
+        # Check if we're in a different event loop than when we were initialized
+        if self._initialized and self._event_loop is not current_loop:
+            logger.warning(f"Event loop changed, reinitializing connection pool")
+            self._initialized = False
+            self._writer_task = None
+            # Create new queue for the new event loop
+            self._write_queue = asyncio.Queue()
+
+        # Check if we're already initialized and the writer task is still alive
+        if self._initialized and self._writer_task and not self._writer_task.done():
+            return
+
+        # If we were initialized but the writer task died, mark as not initialized
+        if self._initialized and (not self._writer_task or self._writer_task.done()):
+            logger.warning("Writer task died, reinitializing connection pool")
+            self._initialized = False
+
+        if self._initialized:
+            return
+
+        # Ensure directory exists
+        db_dir = Path(self.db_path).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create writer connection in a thread to avoid blocking
+        def create_writer():
+            conn = sqlite3.connect(
+                self.db_path,
+                check_same_thread=False,
+                isolation_level="DEFERRED"  # Use DEFERRED for schema init, will switch to None after
+            )
+            conn.row_factory = sqlite3.Row
+
+            # Enable WAL mode for better concurrency
+            conn.execute("PRAGMA journal_mode=WAL")
+            # NORMAL synchronous mode is safe and recommended for WAL
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA busy_timeout=30000")
+            return conn
+
+        self._writer_conn = await asyncio.to_thread(create_writer)
+
+        # Initialize schema immediately during pool creation
+        schema_path = Path(__file__).parent / "sqlite_schema.sql"
+        if schema_path.exists():
+            schema_sql = schema_path.read_text()
+            # executescript handles transactions, which works well with DEFERRED mode
+            await asyncio.to_thread(self._writer_conn.executescript, schema_sql)
+            logger.info("Database schema initialized")
+
+        # Now switch to autocommit mode for regular operations
+        self._writer_conn.isolation_level = None
+
+        # Start writer task and save the current event loop
+        self._writer_task = asyncio.create_task(self._process_writes())
+        self._event_loop = current_loop
+        self._initialized = True
+        logger.info(f"SQLite connection pool initialized with WAL mode at {self.db_path}")
+
+    async def _process_writes(self):
+        """Background task that processes all write operations sequentially."""
+        while not self._closed:
+            try:
+                # Wait for a write operation (with timeout to check _closed)
+                try:
+                    operation = await asyncio.wait_for(
+                        self._write_queue.get(),
+                        timeout=1.0
+                    )
+                except asyncio.TimeoutError:
+                    continue
+
+                func, args, kwargs, future = operation
+
+                try:
+                    # Execute the write operation
+                    result = await asyncio.to_thread(func, *args, **kwargs)
+                    future.set_result(result)
+                except Exception as e:
+                    future.set_exception(e)
+                finally:
+                    self._write_queue.task_done()
+
+            except Exception as e:
+                logger.error(f"Error in write processor: {e}")
+
+    async def execute_write(self, func, *args, **kwargs):
+        """
+        Execute a write operation through the single writer connection.
+
+        All writes are serialized through a queue to prevent concurrent write conflicts.
+
+        Args:
+            func: Callable to execute (e.g., conn.execute, conn.executescript)
+            *args: Positional arguments for func
+            **kwargs: Keyword arguments for func
+
+        Returns:
+            Result from the write operation
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        # Get the current event loop
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        await self._write_queue.put((func, args, kwargs, future))
+
+        # Wait for the result with a timeout
+        try:
+            return await asyncio.wait_for(future, timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.error("Write operation timed out after 30 seconds")
+            raise RuntimeError("Database write operation timed out")
+
+    async def get_reader_connection(self) -> sqlite3.Connection:
+        """
+        Get a read-only connection from the pool.
+
+        Returns:
+            A SQLite connection configured for reading
+        """
+        if not self._initialized:
+            await self.initialize()
+
+        # For now, create a new reader each time
+        # TODO: Implement actual connection pooling for readers
+        def create_reader():
+            conn = sqlite3.connect(
+                self.db_path,
+                check_same_thread=False,
+                uri=True  # Enable URI mode for better options support
+            )
+            conn.row_factory = sqlite3.Row
+
+            # CRITICAL: Set these PRAGMAs in the correct order for WAL mode
+            # 1. Enable WAL mode (must match writer)
+            conn.execute("PRAGMA journal_mode=WAL")
+            # 2. Set busy timeout to wait for locks
+            conn.execute("PRAGMA busy_timeout=30000")
+            # 3. Set synchronous mode for better durability with WAL
+            conn.execute("PRAGMA synchronous=NORMAL")  # NORMAL is safe with WAL
+            # 4. Make connection read-only
+            conn.execute("PRAGMA query_only=ON")
+            return conn
+
+        return await asyncio.to_thread(create_reader)
+
+    def get_writer_connection(self) -> sqlite3.Connection:
+        """Get the dedicated writer connection (for synchronous access)."""
+        if not self._initialized:
+            raise RuntimeError("Pool not initialized. Call await pool.initialize() first.")
+        return self._writer_conn
+
+    async def close(self):
+        """Close all connections and shut down the pool."""
+        self._closed = True
+
+        # Wait for pending writes to complete
+        if self._write_queue:
+            await self._write_queue.join()
+
+        # Checkpoint WAL before closing to ensure all data is flushed to main database
+        if self._writer_conn:
+            try:
+                await asyncio.to_thread(self._writer_conn.execute, "PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception as e:
+                logger.warning(f"Failed to checkpoint WAL before closing: {e}")
+
+        # Cancel writer task
+        if self._writer_task:
+            self._writer_task.cancel()
+            try:
+                await self._writer_task
+            except asyncio.CancelledError:
+                pass
+
+        # Close writer connection
+        if self._writer_conn:
+            await asyncio.to_thread(self._writer_conn.close)
+
+        # Close reader connections
+        for conn in self._reader_pool:
+            await asyncio.to_thread(conn.close)
+
+        logger.info("SQLite connection pool closed")
+
+
+# Global connection pool instance (keyed by database path)
+_connection_pools: Dict[str, SQLiteConnectionPool] = {}
+
+
+async def get_connection_pool() -> SQLiteConnectionPool:
+    """Get or create the connection pool instance for the current database."""
+    db_path = get_sqlite_url()
+
+    # Check if we have a pool for this database
+    if db_path not in _connection_pools:
+        pool = SQLiteConnectionPool(db_path)
+        await pool.initialize()
+        _connection_pools[db_path] = pool
+
+    return _connection_pools[db_path]
+
+
+async def close_connection_pool():
+    """Close all connection pools."""
+    global _connection_pools
+    for pool in _connection_pools.values():
+        await pool.close()
+    _connection_pools.clear()
+
+
 def _validate_identifier(name: str) -> str:
     """
     Validate and return a SQL identifier to prevent SQL injection.
@@ -186,41 +437,33 @@ def parse_surreal_query(query_str: str, vars: Optional[Dict[str, Any]] = None) -
 
 
 @asynccontextmanager
-async def db_connection():
+async def db_connection(read_only: bool = False):
     """
-    Async context manager for SQLite database connections.
-    SQLite doesn't have native async support, so we use asyncio.to_thread for I/O.
+    Async context manager for SQLite database connections using the connection pool.
+
+    This now uses the global connection pool with single-writer pattern to prevent
+    database corruption from concurrent writes.
+
+    Args:
+        read_only: If True, get a read-only connection. If False, get the writer connection.
+
+    Yields:
+        A SQLite connection from the pool
     """
-    db_path = get_sqlite_url()
+    pool = await get_connection_pool()
 
-    # Ensure directory exists
-    db_dir = Path(db_path).parent
-    db_dir.mkdir(parents=True, exist_ok=True)
-
-    # Connect to database
-    # Set check_same_thread=False to allow usage across threads with asyncio.to_thread
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row  # Return rows as dictionaries
-    # Enforce foreign keys and improve busy handling
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 5000")
-
-    try:
-        # Initialize schema if needed
-        await _initialize_schema(conn)
-        yield conn
-    finally:
-        conn.close()
-
-
-async def _initialize_schema(conn: sqlite3.Connection):
-    """Initialize database schema if not exists"""
-    schema_path = Path(__file__).parent / "sqlite_schema.sql"
-
-    if schema_path.exists():
-        schema_sql = schema_path.read_text()
-        await asyncio.to_thread(conn.executescript, schema_sql)
-        await asyncio.to_thread(conn.commit)
+    if read_only:
+        # Get a read-only connection for SELECT queries
+        conn = await pool.get_reader_connection()
+        try:
+            yield conn
+        finally:
+            await asyncio.to_thread(conn.close)
+    else:
+        # Use the shared writer connection for all write operations
+        # Schema is initialized when the pool is created
+        yield pool.get_writer_connection()
+        # Don't close the writer connection - it's managed by the pool
 
 
 def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
@@ -332,7 +575,7 @@ async def repo_query(
             "This will be implemented in a future update."
         )
 
-    async with db_connection() as conn:
+    async with db_connection(read_only=True) as conn:
         try:
             # Handle SELECT * FROM $id pattern (direct record lookup by ID)
             # Check if this is a simple "SELECT * FROM :var" pattern
@@ -395,26 +638,30 @@ async def repo_create(table: str, data: Dict[str, Any]) -> Dict[str, Any]:
     data["updated"] = now
 
     try:
-        async with db_connection() as conn:
-            # Handle special fields
-            insert_data = _prepare_data_for_insert(table, data)
+        # Handle special fields
+        insert_data = _prepare_data_for_insert(table, data)
 
-            # Build INSERT query with validated identifiers
-            # Validate column names to prevent SQL injection
-            columns = [_validate_identifier(col) for col in insert_data.keys()]
-            placeholders = [f":{col}" for col in insert_data.keys()]
+        # Build INSERT query with validated identifiers
+        # Validate column names to prevent SQL injection
+        columns = [_validate_identifier(col) for col in insert_data.keys()]
+        placeholders = [f":{col}" for col in insert_data.keys()]
 
-            sql = f"""
-                INSERT INTO {table} ({', '.join(columns)})
-                VALUES ({', '.join(placeholders)})
-            """
+        sql = f"""
+            INSERT INTO {table} ({', '.join(columns)})
+            VALUES ({', '.join(placeholders)})
+        """
 
-            await asyncio.to_thread(conn.execute, sql, insert_data)
-            await asyncio.to_thread(conn.commit)
+        # Use connection pool for writes
+        pool = await get_connection_pool()
+        conn = pool.get_writer_connection()
 
-            # Fetch and return the created record
+        # Execute write through the pool's queue to serialize writes
+        await pool.execute_write(conn.execute, sql, insert_data)
+
+        # Fetch and return the created record using a read connection
+        async with db_connection(read_only=True) as read_conn:
             cursor = await asyncio.to_thread(
-                conn.execute,
+                read_conn.execute,
                 f"SELECT * FROM {table} WHERE id = :id",
                 {"id": record_id}
             )
@@ -485,30 +732,33 @@ async def repo_relate(
     }
 
     try:
-        async with db_connection() as conn:
-            # Build INSERT query for relationship table
-            # Validate column names and quote 'in' and 'out' as they are SQL keywords
-            columns = []
-            for col in rel_data.keys():
-                _validate_identifier(col)  # Validate first
-                if col in ['in', 'out']:
-                    columns.append(f'"{col}"')  # Quote SQL keywords
-                else:
-                    columns.append(col)
+        # Build INSERT query for relationship table
+        # Validate column names and quote 'in' and 'out' as they are SQL keywords
+        columns = []
+        for col in rel_data.keys():
+            _validate_identifier(col)  # Validate first
+            if col in ['in', 'out']:
+                columns.append(f'"{col}"')  # Quote SQL keywords
+            else:
+                columns.append(col)
 
-            placeholders = [f":{col}" for col in rel_data.keys()]
+        placeholders = [f":{col}" for col in rel_data.keys()]
 
-            sql = f"""
-                INSERT OR REPLACE INTO {relationship} ({', '.join(columns)})
-                VALUES ({', '.join(placeholders)})
-            """
+        sql = f"""
+            INSERT OR REPLACE INTO {relationship} ({', '.join(columns)})
+            VALUES ({', '.join(placeholders)})
+        """
 
-            await asyncio.to_thread(conn.execute, sql, rel_data)
-            await asyncio.to_thread(conn.commit)
+        # Use connection pool for writes
+        pool = await get_connection_pool()
+        conn = pool.get_writer_connection()
 
-            # Return the relationship record
+        await pool.execute_write(conn.execute, sql, rel_data)
+
+        # Return the relationship record using a read connection
+        async with db_connection(read_only=True) as read_conn:
             cursor = await asyncio.to_thread(
-                conn.execute,
+                read_conn.execute,
                 f"SELECT * FROM {relationship} WHERE id = :id",
                 {"id": relation_id}
             )
@@ -546,27 +796,27 @@ async def repo_upsert(
     data["id"] = record_id
 
     try:
-        async with db_connection() as conn:
-            # Check if record exists
+        # Check if record exists using a read connection
+        async with db_connection(read_only=True) as read_conn:
             cursor = await asyncio.to_thread(
-                conn.execute,
+                read_conn.execute,
                 f"SELECT id FROM {table} WHERE id = :id",
                 {"id": record_id}
             )
             exists = await asyncio.to_thread(cursor.fetchone)
 
-            if exists:
-                # Update
-                return await repo_update(table, record_id, data)
-            else:
-                # Create
-                if "created" not in data:
-                    data["created"] = datetime.now(timezone.utc).isoformat()
-                if "updated" not in data:
-                    data["updated"] = datetime.now(timezone.utc).isoformat()
+        if exists:
+            # Update
+            return await repo_update(table, record_id, data)
+        else:
+            # Create
+            if "created" not in data:
+                data["created"] = datetime.now(timezone.utc).isoformat()
+            if "updated" not in data:
+                data["updated"] = datetime.now(timezone.utc).isoformat()
 
-                result = await repo_create(table, data)
-                return [result]
+            result = await repo_create(table, data)
+            return [result]
 
     except sqlite3.OperationalError as e:
         logger.exception("Operational error upserting record")
@@ -606,26 +856,30 @@ async def repo_update(
         # Update timestamp
         data["updated"] = datetime.now(timezone.utc).isoformat()
 
-        async with db_connection() as conn:
-            # Prepare data
-            update_data = _prepare_data_for_insert(table, data)
+        # Prepare data
+        update_data = _prepare_data_for_insert(table, data)
 
-            # Build UPDATE query with validated column names
-            set_clauses = [f"{_validate_identifier(col)} = :{col}" for col in update_data.keys()]
-            sql = f"""
-                UPDATE {table}
-                SET {', '.join(set_clauses)}
-                WHERE id = :record_id
-            """
+        # Build UPDATE query with validated column names
+        set_clauses = [f"{_validate_identifier(col)} = :{col}" for col in update_data.keys()]
+        sql = f"""
+            UPDATE {table}
+            SET {', '.join(set_clauses)}
+            WHERE id = :record_id
+        """
 
-            update_data["record_id"] = record_id
+        update_data["record_id"] = record_id
 
-            await asyncio.to_thread(conn.execute, sql, update_data)
-            await asyncio.to_thread(conn.commit)
+        # Use connection pool for writes
+        pool = await get_connection_pool()
+        conn = pool.get_writer_connection()
 
-            # Fetch and return updated record
+        # Execute write through the pool's queue to serialize writes
+        await pool.execute_write(conn.execute, sql, update_data)
+
+        # Fetch and return updated record using a read connection
+        async with db_connection(read_only=True) as read_conn:
             cursor = await asyncio.to_thread(
-                conn.execute,
+                read_conn.execute,
                 f"SELECT * FROM {table} WHERE id = :id",
                 {"id": record_id}
             )
@@ -660,12 +914,14 @@ async def repo_delete(record_id: Union[str, Any]):
         # Validate table name to prevent SQL injection
         table = _validate_identifier(table)
 
-        async with db_connection() as conn:
-            sql = f"DELETE FROM {table} WHERE id = :id"
-            await asyncio.to_thread(conn.execute, sql, {"id": record_id})
-            await asyncio.to_thread(conn.commit)
+        # Use connection pool for writes
+        pool = await get_connection_pool()
+        conn = pool.get_writer_connection()
 
-            return True
+        sql = f"DELETE FROM {table} WHERE id = :id"
+        await pool.execute_write(conn.execute, sql, {"id": record_id})
+
+        return True
 
     except ValueError as e:
         logger.exception("Invalid record ID format for deletion")
@@ -742,9 +998,11 @@ async def repo_ensure_table(table: str, schema_sql: str) -> None:
         # Validate table name to prevent SQL injection
         _validate_identifier(table)
 
-        async with db_connection() as conn:
-            await asyncio.to_thread(conn.execute, schema_sql)
-            await asyncio.to_thread(conn.commit)
+        # Use connection pool for writes
+        pool = await get_connection_pool()
+        conn = pool.get_writer_connection()
+
+        await pool.execute_write(conn.execute, schema_sql)
 
         logger.debug(f"Ensured table '{table}' exists")
 

@@ -68,7 +68,19 @@ async def lifespan(app: FastAPI):
     # Yield control to the application
     yield
 
-    # Shutdown: cleanup if needed
+    # Shutdown: cleanup resources
+    logger.info("Shutting down API...")
+
+    # Close the SQLite connection pool if using SQLite
+    try:
+        from open_notebook.database.repository_factory import get_database_type
+        if get_database_type() == "sqlite":
+            from open_notebook.database.sqlite_repository import close_connection_pool
+            await close_connection_pool()
+            logger.info("SQLite connection pool closed successfully")
+    except Exception as e:
+        logger.error(f"Error closing connection pool: {e}")
+
     logger.info("API shutdown complete")
 
 

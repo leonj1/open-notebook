@@ -11,6 +11,7 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
 
 # Create a temporary file for SQLite database that persists across connections
@@ -25,6 +26,7 @@ os.environ["SQLITE_URL"] = f"sqlite:///{temp_db_path}"
 from api.background_tasks import process_source_background
 from api.main import app
 from open_notebook.services import CommandTableService
+from open_notebook.database.sqlite_repository import close_connection_pool
 
 
 def teardown_module():
@@ -37,6 +39,13 @@ def teardown_module():
 
 class TestBackgroundTasksSQLite:
     """Test suite for SQLite background task processing."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def cleanup_connection_pool(self):
+        """Clean up connection pool after each test to avoid event loop issues."""
+        yield
+        # Close the connection pool after each test
+        await close_connection_pool()
 
     @pytest.mark.asyncio
     async def test_ensure_command_table_creates_table(self):
@@ -287,11 +296,12 @@ class TestSourcesAPIAsyncProcessing:
         """Set up test client."""
         self.client = TestClient(app)
 
+    @patch("api.routers.sources.process_source_background")
     @patch("api.routers.sources.Source")
     @patch("api.routers.sources.Notebook")
     @patch("api.routers.sources.CommandTableService.create_command_record")
     def test_create_source_with_async_processing_sqlite(
-        self, mock_create_command, mock_notebook, mock_source
+        self, mock_create_command, mock_notebook, mock_source, mock_process_source
     ):
         """Test creating a source with async_processing=true in SQLite mode."""
         # Mock notebook exists
@@ -313,6 +323,11 @@ class TestSourcesAPIAsyncProcessing:
         async def mock_create(app, command, input_data):
             return "command:abc-123"
         mock_create_command.side_effect = mock_create
+
+        # Mock background task to prevent actual execution
+        async def mock_bg_task(*args, **kwargs):
+            return None
+        mock_process_source.side_effect = mock_bg_task
 
         # Make request
         response = self.client.post(
