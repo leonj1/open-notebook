@@ -20,14 +20,20 @@ if __name__ == "__main__":
     host = os.getenv("API_HOST", "0.0.0.0")
     port = int(os.getenv("API_PORT", "5055"))
     reload = os.getenv("API_RELOAD", "true").lower() == "true"
+    workers = int(os.getenv("API_WORKERS", "1"))
 
     print(f"Starting Open Notebook API server on {host}:{port}")
     print(f"Reload mode: {reload}")
+    print(f"Workers: {workers}")
+
+    if reload and workers > 1:
+        print("Warning: Reload mode is not recommended with more than 1 worker.")
 
     uvicorn.run(
         "api.main:app",
         host=host,
         port=port,
         reload=reload,
+        workers=workers,
         reload_dirs=[str(current_dir)] if reload else None,
     )

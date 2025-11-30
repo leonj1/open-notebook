@@ -134,3 +134,6 @@ specs/
 .claude
 
 .playwright-mcp/
+tmp/
+*.pdf
+
