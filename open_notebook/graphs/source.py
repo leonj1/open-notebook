@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from content_core import extract_content
-from content_core.common import ProcessSourceState
+from content_core.common import ProcessSourceOutput, ProcessSourceState
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
@@ -58,13 +58,13 @@ async def content_process(state: SourceState) -> dict:
             # Extract title from filename if not provided
             title = content_state.get("title") or Path(file_path).stem
 
-            # Create ProcessSourceState compatible with content-core format
-            processed_state: ProcessSourceState = {
-                "url": content_state.get("url", ""),
-                "file_path": file_path,
-                "content": markdown_content,
-                "title": title,
-            }
+            # Create ProcessSourceOutput compatible with content-core format
+            processed_state = ProcessSourceOutput(
+                url=content_state.get("url", ""),
+                file_path=file_path,
+                content=markdown_content,
+                title=title,
+            )
 
             logger.info(
                 f"Successfully parsed PDF with docling-parse: "

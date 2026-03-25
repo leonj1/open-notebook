@@ -14,7 +14,7 @@ from fastapi import (
 )
 from fastapi.responses import FileResponse, Response
 from loguru import logger
-from surreal_commands import execute_command_sync
+from surreal_commands import submit_command, wait_for_command
 
 from api.background_tasks import process_source_background
 from api.command_service import CommandService
@@ -535,10 +535,13 @@ async def create_source(
                     embed=source_data.embed,
                 )
 
-                result = execute_command_sync(
+                cmd_id = submit_command(
                     "open_notebook",  # app name
                     "process_source",  # command name
                     command_input.model_dump(),
+                )
+                result = await wait_for_command(
+                    cmd_id,
                     timeout=300,  # 5 minute timeout for sync processing
                 )
 
