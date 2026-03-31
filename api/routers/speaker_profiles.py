@@ -1,5 +1,7 @@
-from typing import Any, Dict, List
+import os
+from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 from pydantic import BaseModel, Field
@@ -7,6 +9,60 @@ from pydantic import BaseModel, Field
 from open_notebook.domain.podcast import SpeakerProfile
 
 router = APIRouter()
+
+
+class VoiceInfo(BaseModel):
+    voice_id: str
+    name: str
+    description: Optional[str] = None
+    gender: Optional[str] = None
+    age: Optional[str] = None
+    accent: Optional[str] = None
+    use_case: Optional[str] = None
+
+
+@router.get("/speaker-profiles/voices/{provider}", response_model=List[VoiceInfo])
+async def list_provider_voices(provider: str):
+    """List available voices for a TTS provider."""
+    if provider != "elevenlabs":
+        raise HTTPException(status_code=400, detail=f"Voice listing not supported for provider '{provider}'")
+
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ELEVENLABS_API_KEY not configured")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                "https://api.elevenlabs.io/v1/voices",
+                headers={"xi-api-key": api_key},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        voices: List[VoiceInfo] = []
+        for v in data.get("voices", []):
+            labels = v.get("labels", {})
+            voices.append(
+                VoiceInfo(
+                    voice_id=v["voice_id"],
+                    name=v.get("name", v["voice_id"]),
+                    description=labels.get("description"),
+                    gender=labels.get("gender"),
+                    age=labels.get("age"),
+                    accent=labels.get("accent"),
+                    use_case=labels.get("use_case"),
+                )
+            )
+        voices.sort(key=lambda v: v.name)
+        return voices
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"ElevenLabs API error: {e}")
+        raise HTTPException(status_code=502, detail="Failed to fetch voices from ElevenLabs")
+    except Exception as e:
+        logger.error(f"Failed to list voices: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 class SpeakerProfileResponse(BaseModel):

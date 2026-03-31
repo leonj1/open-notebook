@@ -110,4 +110,19 @@ export const podcastsApi = {
     )
     return response.data
   },
+
+  listProviderVoices: async (provider: string) => {
+    const response = await apiClient.get<
+      Array<{
+        voice_id: string
+        name: string
+        description?: string
+        gender?: string
+        age?: string
+        accent?: string
+        use_case?: string
+      }>
+    >(`/speaker-profiles/voices/${provider}`)
+    return response.data
+  },
 }

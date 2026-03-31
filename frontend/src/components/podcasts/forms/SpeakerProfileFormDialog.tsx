@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import type { FieldErrorsImpl } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { Plus, Trash2 } from 'lucide-react'
 
 import { SpeakerProfile } from '@/lib/types/podcasts'
+import { podcastsApi } from '@/lib/api/podcasts'
 import {
   useCreateSpeakerProfile,
   useUpdateSpeakerProfile,
@@ -131,6 +132,27 @@ export function SpeakerProfileFormDialog({
     () => modelOptions[provider] ?? [],
     [modelOptions, provider]
   )
+
+  // ElevenLabs voice list
+  const [providerVoices, setProviderVoices] = useState<
+    Array<{ voice_id: string; name: string; description?: string; gender?: string; age?: string; accent?: string }>
+  >([])
+  const [voicesLoading, setVoicesLoading] = useState(false)
+
+  useEffect(() => {
+    if (provider === 'elevenlabs') {
+      setVoicesLoading(true)
+      podcastsApi
+        .listProviderVoices(provider)
+        .then((voices) => setProviderVoices(voices))
+        .catch(() => setProviderVoices([]))
+        .finally(() => setVoicesLoading(false))
+    } else {
+      setProviderVoices([])
+    }
+  }, [provider])
+
+  const hasVoiceDropdown = provider === 'elevenlabs' && providerVoices.length > 0
 
   const speakersArrayError = (
     errors.speakers as FieldErrorsImpl<{ root?: { message?: string } }> | undefined
@@ -323,10 +345,34 @@ export function SpeakerProfileFormDialog({
                   </div>
                   <div className="space-y-2">
                     <Label>Voice ID *</Label>
-                    <Input
-                      {...register(`speakers.${index}.voice_id` as const)}
-                      placeholder="voice_123"
-                    />
+                    {hasVoiceDropdown ? (
+                      <Controller
+                        control={control}
+                        name={`speakers.${index}.voice_id` as const}
+                        render={({ field: voiceField }) => (
+                          <Select value={voiceField.value} onValueChange={voiceField.onChange}>
+                            <SelectTrigger>
+                              <SelectValue placeholder={voicesLoading ? 'Loading voices…' : 'Select voice'} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {providerVoices.map((v) => {
+                                const meta = [v.gender, v.age, v.accent].filter(Boolean).join(', ')
+                                return (
+                                  <SelectItem key={v.voice_id} value={v.voice_id}>
+                                    {v.name}{meta ? ` (${meta})` : ''}
+                                  </SelectItem>
+                                )
+                              })}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                    ) : (
+                      <Input
+                        {...register(`speakers.${index}.voice_id` as const)}
+                        placeholder="voice_123"
+                      />
+                    )}
                     {errors.speakers?.[index]?.voice_id ? (
                       <p className="text-xs text-red-600">
                         {errors.speakers[index]?.voice_id?.message}
