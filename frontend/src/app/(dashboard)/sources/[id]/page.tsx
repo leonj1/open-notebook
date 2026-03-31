@@ -1,19 +1,28 @@
 'use client'
 
 import { useRouter, useParams } from 'next/navigation'
-import { useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Columns2, Maximize2, PanelRight } from 'lucide-react'
 import { useSourceChat } from '@/lib/hooks/useSourceChat'
 import { ChatPanel } from '@/components/source/ChatPanel'
 import { useNavigation } from '@/lib/hooks/use-navigation'
 import { SourceDetailContent } from '@/components/source/SourceDetailContent'
+
+type ChatLayout = 'default' | 'half' | 'full'
+
+const layoutGridClass: Record<ChatLayout, string> = {
+  default: 'grid-cols-1 lg:grid-cols-[2fr_1fr]',
+  half: 'grid-cols-1 md:grid-cols-[1fr_1fr]',
+  full: 'grid-cols-1',
+}
 
 export default function SourceDetailPage() {
   const router = useRouter()
   const params = useParams()
   const sourceId = decodeURIComponent(params.id as string)
   const navigation = useNavigation()
+  const [chatLayout, setChatLayout] = useState<ChatLayout>('default')
 
   // Initialize source chat
   const chat = useSourceChat(sourceId)
@@ -27,7 +36,7 @@ export default function SourceDetailPage() {
   return (
     <div className="flex flex-col h-screen">
       {/* Back button */}
-      <div className="pt-6 pb-4 px-6">
+      <div className="pt-6 pb-4 px-6 flex items-center justify-between">
         <Button
           variant="ghost"
           size="sm"
@@ -37,12 +46,43 @@ export default function SourceDetailPage() {
           <ArrowLeft className="mr-2 h-4 w-4" />
           {navigation.getReturnLabel()}
         </Button>
+
+        {/* Chat layout toggle */}
+        <div className="flex items-center gap-1 mb-4">
+          <Button
+            variant={chatLayout === 'default' ? 'secondary' : 'ghost'}
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setChatLayout('default')}
+            title="Default chat width"
+          >
+            <PanelRight className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant={chatLayout === 'half' ? 'secondary' : 'ghost'}
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setChatLayout('half')}
+            title="Half width chat"
+          >
+            <Columns2 className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant={chatLayout === 'full' ? 'secondary' : 'ghost'}
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setChatLayout('full')}
+            title="Full width chat"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
       {/* Main content: Source detail + Chat */}
-      <div className="flex-1 grid gap-6 lg:grid-cols-[2fr_1fr] overflow-hidden px-6">
+      <div className={`flex-1 grid gap-6 ${layoutGridClass[chatLayout]} overflow-hidden px-6 transition-all duration-200`}>
         {/* Left column - Source detail */}
-        <div className="overflow-y-auto px-4 pb-6">
+        <div className={`overflow-y-auto px-4 pb-6 ${chatLayout === 'full' ? 'hidden' : ''}`}>
           <SourceDetailContent
             sourceId={sourceId}
             showChatButton={false}
