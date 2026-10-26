@@ -21,7 +21,7 @@ env:
 
 jobs:
   extract-version:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     outputs:
       version: ${{ steps.version.outputs.version }}
       has_dockerhub_secrets: ${{ steps.check.outputs.has_dockerhub_secrets }}
@@ -52,7 +52,7 @@ jobs:
 
   build-regular:
     needs: extract-version
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -143,7 +143,7 @@ jobs:
 
   build-single:
     needs: extract-version
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -234,7 +234,7 @@ jobs:
 
   summary:
     needs: [extract-version, build-regular, build-single]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     if: always()
     steps:
       - name: Build Summary

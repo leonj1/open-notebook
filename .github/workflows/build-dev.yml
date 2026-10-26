@@ -37,7 +37,7 @@ env:
 
 jobs:
   extract-version:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -53,7 +53,7 @@ jobs:
 
   test-build-regular:
     needs: extract-version
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     if: github.event.inputs.dockerfile == 'regular' || github.event.inputs.dockerfile == 'both' || github.event_name != 'workflow_dispatch'
     steps:
       - name: Checkout
@@ -88,7 +88,7 @@ jobs:
 
   test-build-single:
     needs: extract-version
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     if: github.event.inputs.dockerfile == 'single' || github.event.inputs.dockerfile == 'both' || github.event_name != 'workflow_dispatch'
     steps:
       - name: Checkout
@@ -123,7 +123,7 @@ jobs:
 
   summary:
     needs: [extract-version, test-build-regular, test-build-single]
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64]
     if: always()
     steps:
       - name: Development Build Summary
